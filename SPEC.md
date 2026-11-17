@@ -10,7 +10,7 @@
 * **語音轉文字 (STT)**：Deepgram（模型 `nova-3`，失敗時自動回退 `nova-2`）— 多語偵測 `zh-HK`、`zh-CN`、`en`。環境變數 `DEEPGRAM_API_KEY`。
 * **決定模型 (Fast Path)**：TypeSafe Jev（模型 `jev-latest`）— 負責毫秒級多選題判斷（不生成文字）。環境變數 `JEV_API_KEY`。
 * **生成大腦 (Slow Path)**：OpenRouter（模型 `google/gemini-2.5-flash`）— 負責結合知識庫生成口語化回覆。環境變數 `OPENROUTER_API_KEY`。
-* **語音合成 (TTS)**：只使用 ElevenLabs。預設 `model_id` 為 `eleven_turbo_v4`，失敗時自動回退 `eleven_flash_v2_5`。環境變數 `ELEVENLABS_API_KEY`（只從 `process.env` 讀取）。負責預錄短片及即時語音串流。
+* **語音合成 (TTS)**：只使用 ElevenLabs。可用的 `model_id` 為 `eleven_v4_turbo`（`eleven_turbo_v4` 不是有效的 model id），失敗時自動回退 `eleven_flash_v2_5`。廣東話（yue）、普通話（zh）與英文（en）的 voice id 均為 `pyCpQJNpFBywhVAwOzn6`。環境變數 `ELEVENLABS_API_KEY`（只從 `process.env` 讀取）。負責預錄短片及即時語音串流。
 
 ---
 
@@ -57,4 +57,44 @@
 * **Phase 1**：建立 `config/clips-config.json`、`config/site-map.json`、`knowledge-base/company-info.md` 及離線生成預錄 MP3 的腳本 `scripts/generate-clips.ts`。
 * **Phase 2**：實作後端 `/api/fast-decision`（接入 Jev API）與 `/api/chat-relay`（接入知識庫與大模型）。
 * **Phase 3**：重構前端 `AudioQueue` 播放管理器，實現雙軌並行請求、音軌無縫接力及自動網頁導航。
-* **Phase 4**：建立一個包含 4 個頁面（主頁、療程服務、價目表、網上預約）的示範網站外殼，並加入「首音延遲（TTFA）毫秒計時器」供客戶 Demo 展示。
+* **Phase 4**：將匯出的 VoicePilot AI（領聲智導）網站掛載為 Next.js `app/page.tsx` 的公司外殼，並接上 Phase 3 語音元件（詳見第 6 節與第 7 節）。
+
+---
+
+## 6. Phase 4：掛載 VoicePilot AI（領聲智導）公司外殼
+
+Phase 4 把已匯出的 **VoicePilot AI（領聲智導）** 網站掛成 Next.js `app/page.tsx` 的公司外殼。外殼必須原樣保留：
+
+* 視覺設計與 CSS 動效
+* `window.navigateToPage`
+* 區段 id：`#hero`、`#features`、`#use-cases`、`#pricing`、`#about`
+* 按鈕 id：`open-voice-demo-btn`
+
+語音掛載：
+
+* 將 Phase 3 語音元件掛在佔位符 `CURSOR_VOICE_WIDGET_MOUNT_POINT`（右下角）。
+* 點擊 `#open-voice-demo-btn` 打開語音面板。
+
+行銷頁只負責外殼。語音邏輯不得寫進該頁。
+
+---
+
+## 7. 架構規則：語音核心與客戶網站解耦
+
+Phase 1–3 的語音核心必須與公司外殼解耦。換設定即可把同一套核心接到另一個客戶網站，包括日後以獨立 script 嵌入 Shopify 或 WordPress。
+
+以下能力只放在 `components/voice-widget/` 與 `lib/voice-engine/`，不得寫進行銷頁：
+
+* Deepgram STT
+* Jev 路由
+* OpenRouter 知識庫回答
+* ElevenLabs TTS
+* 無縫音頻播放器
+* 浮動 UI
+
+網站專屬資料以 config / props 注入，不寫死在核心裡：
+
+* 知識庫檔案
+* `site-map.json`（頁面與區段跳轉）
+* `voiceId`
+* 預錄開場白 MP3
