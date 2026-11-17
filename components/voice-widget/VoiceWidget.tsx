@@ -149,6 +149,7 @@ export function VoiceWidget({
   const abortRef = useRef<AbortController | null>(null);
   const turnRef = useRef(0);
   const spokenTurnsRef = useRef(0);
+  const sessionRef = useRef(globalThis.crypto?.randomUUID?.() ?? `session-${Date.now()}`);
   const lineIdRef = useRef(0);
   const inflightRef = useRef(false);
   const speakerOnRef = useRef(true);
@@ -481,8 +482,19 @@ export function VoiceWidget({
             turnCount,
             openerTranscript: decision.clipText,
             lang: decision.lang,
+            siteId: "voicepilot-hq",
+            sessionId: sessionRef.current,
+            intent: decision.intent,
+            openerClipId: decision.clipFile,
           }
-        : { text, knowledgeBasePath, currentPage, turnCount };
+        : {
+            text,
+            knowledgeBasePath,
+            currentPage,
+            turnCount,
+            siteId: "voicepilot-hq",
+            sessionId: sessionRef.current,
+          };
       try {
         const payload = await postJson("/api/chat-relay", body, controller.signal);
         if (turnRef.current !== turn || activeRef.current !== active) return;
@@ -729,6 +741,7 @@ export function VoiceWidget({
     </div>
   );
 
+  if (pathname?.startsWith("/admin")) return null;
   if (mountNode) return createPortal(panel, mountNode);
   return panel;
 }
