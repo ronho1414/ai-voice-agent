@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { VoiceAgent } from "@/components/VoiceAgent";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "AI Voice Agent",
-  description: "Phase 1 scaffold for a trilingual voice agent.",
+  description: "Trilingual voice agent with a fast opener and a spoken reply.",
 };
 
 export default function RootLayout({
@@ -13,7 +14,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-Hant">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        {children}
+        <VoiceAgent />
+      </body>
     </html>
   );
 }

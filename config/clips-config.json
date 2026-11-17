@@ -1,92 +1,111 @@
-[
-  {
-    "intent": "greeting",
-    "lang": "yue",
-    "file": "greeting_yue.mp3",
-    "clipText": "你好，有咩可以幫到你呀？"
+{
+  "voiceSettings": {
+    "yue": {
+      "voiceId": "pyCpQJNpFBywhVAwOzn6",
+      "stability": 0.5,
+      "similarity_boost": 0.75
+    },
+    "zh": {
+      "voiceId": "pyCpQJNpFBywhVAwOzn6",
+      "stability": 0.5,
+      "similarity_boost": 0.75
+    },
+    "en": {
+      "voiceId": "pyCpQJNpFBywhVAwOzn6",
+      "stability": 0.5,
+      "similarity_boost": 0.75
+    }
   },
-  {
-    "intent": "greeting",
-    "lang": "zh",
-    "file": "greeting_zh.mp3",
-    "clipText": "你好，有什麼可以幫你的？"
-  },
-  {
-    "intent": "greeting",
-    "lang": "en",
-    "file": "greeting_en.mp3",
-    "clipText": "Hi, how can I help you?"
-  },
-  {
-    "intent": "checking_info",
-    "lang": "yue",
-    "file": "checking_info_yue.mp3",
-    "clipText": "等我幫你睇睇。"
-  },
-  {
-    "intent": "checking_info",
-    "lang": "zh",
-    "file": "checking_info_zh.mp3",
-    "clipText": "我幫你查一下。"
-  },
-  {
-    "intent": "checking_info",
-    "lang": "en",
-    "file": "checking_info_en.mp3",
-    "clipText": "Let me check that for you."
-  },
-  {
-    "intent": "navigating",
-    "lang": "yue",
-    "file": "navigating_yue.mp3",
-    "clipText": "好，我而家帶你去嗰版。"
-  },
-  {
-    "intent": "navigating",
-    "lang": "zh",
-    "file": "navigating_zh.mp3",
-    "clipText": "好，我帶你去那個頁面。"
-  },
-  {
-    "intent": "navigating",
-    "lang": "en",
-    "file": "navigating_en.mp3",
-    "clipText": "Okay, I'll take you to that page."
-  },
-  {
-    "intent": "pricing",
-    "lang": "yue",
-    "file": "pricing_yue.mp3",
-    "clipText": "等我同你睇下價錢先。"
-  },
-  {
-    "intent": "pricing",
-    "lang": "zh",
-    "file": "pricing_zh.mp3",
-    "clipText": "我幫你看一下價格。"
-  },
-  {
-    "intent": "pricing",
-    "lang": "en",
-    "file": "pricing_en.mp3",
-    "clipText": "Let me look up the price."
-  },
-  {
-    "intent": "empathy",
-    "lang": "yue",
-    "file": "empathy_yue.mp3",
-    "clipText": "唔緊要，我明白你嘅情況。"
-  },
-  {
-    "intent": "empathy",
-    "lang": "zh",
-    "file": "empathy_zh.mp3",
-    "clipText": "沒關係，我明白你的情況。"
-  },
-  {
-    "intent": "empathy",
-    "lang": "en",
-    "file": "empathy_en.mp3",
-    "clipText": "I understand, and I'll help with that."
-  }
-]
+  "clips": [
+    {
+      "intent": "greeting",
+      "lang": "yue",
+      "file": "greeting_yue.mp3",
+      "clipText": "你好，有咩可以幫到你呀？"
+    },
+    {
+      "intent": "greeting",
+      "lang": "zh",
+      "file": "greeting_zh.mp3",
+      "clipText": "你好，有什麼可以幫你的？"
+    },
+    {
+      "intent": "greeting",
+      "lang": "en",
+      "file": "greeting_en.mp3",
+      "clipText": "Hi, how can I help you?"
+    },
+    {
+      "intent": "checking_info",
+      "lang": "yue",
+      "file": "checking_info_yue.mp3",
+      "clipText": "等我幫你睇睇。"
+    },
+    {
+      "intent": "checking_info",
+      "lang": "zh",
+      "file": "checking_info_zh.mp3",
+      "clipText": "我幫你查一下。"
+    },
+    {
+      "intent": "checking_info",
+      "lang": "en",
+      "file": "checking_info_en.mp3",
+      "clipText": "Let me check that for you."
+    },
+    {
+      "intent": "navigating",
+      "lang": "yue",
+      "file": "navigating_yue.mp3",
+      "clipText": "好，我而家帶你去嗰版。"
+    },
+    {
+      "intent": "navigating",
+      "lang": "zh",
+      "file": "navigating_zh.mp3",
+      "clipText": "好，我帶你去那個頁面。"
+    },
+    {
+      "intent": "navigating",
+      "lang": "en",
+      "file": "navigating_en.mp3",
+      "clipText": "Okay, I'll take you to that page."
+    },
+    {
+      "intent": "pricing",
+      "lang": "yue",
+      "file": "pricing_yue.mp3",
+      "clipText": "等我同你睇下價錢先。"
+    },
+    {
+      "intent": "pricing",
+      "lang": "zh",
+      "file": "pricing_zh.mp3",
+      "clipText": "我幫你看一下價格。"
+    },
+    {
+      "intent": "pricing",
+      "lang": "en",
+      "file": "pricing_en.mp3",
+      "clipText": "Let me look up the price."
+    },
+    {
+      "intent": "empathy",
+      "lang": "yue",
+      "file": "empathy_yue.mp3",
+      "clipText": "唔緊要，我明白你嘅情況。"
+    },
+    {
+      "intent": "empathy",
+      "lang": "zh",
+      "file": "empathy_zh.mp3",
+      "clipText": "沒關係，我明白你的情況。"
+    },
+    {
+      "intent": "empathy",
+      "lang": "en",
+      "file": "empathy_en.mp3",
+      "clipText": "I understand, and I'll help with that."
+    }
+  ]
+}

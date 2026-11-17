@@ -1,8 +1,8 @@
 # AI Voice Agent
 
-Phase 1 of a trilingual (Cantonese, Mandarin, English) low-latency voice agent. The spec is in `SPEC.md`.
+Trilingual clinic voice agent (Cantonese, Mandarin, English). The spec is in `SPEC.md`.
 
-This repo holds the filler-clip config, the site map, a placeholder clinic knowledge base, and an offline script that generates the short opener MP3s. Starting the app does not call a speech API.
+A short opener plays from memory while the answer is generated, then the spoken reply starts as soon as that opener ends.
 
 ## Develop
 
@@ -11,12 +11,23 @@ npm install
 npm run dev
 ```
 
+Keys live in the environment: `DEEPGRAM_API_KEY`, `JEV_API_KEY`, `OPENROUTER_API_KEY`, and `ELEVENLABS_API_KEY`. Names are listed in `.env.example`.
+
+```bash
+npm run lint
+npm run typecheck
+```
+
 ## Clips
 
-Generate the filler clips offline once `ELEVENLABS_API_KEY` is set in the environment:
+`config/clips-config.json` holds the opener lines and a `voiceSettings` entry per language (`voiceId`, `stability`, `similarity_boost`). The clip script and the live reply both read the voice for that language from this file.
 
 ```bash
 npm run generate:clips
 ```
 
-The script reads `config/clips-config.json` and writes `public/clips/{intent}_{lang}.mp3` with ElevenLabs `eleven_turbo_v4`, and falls back to `eleven_flash_v2_5` if that request fails. It reads the key only from `process.env.ELEVENLABS_API_KEY`. It does not run on install or on `npm run dev`.
+The script writes `public/clips/{intent}_{lang}.mp3`. It tries ElevenLabs `eleven_turbo_v4`, then `eleven_v4_turbo`, then `eleven_flash_v2_5`. It does not run on install or on `npm run dev`.
+
+## Talk
+
+Use the microphone on the page. Speech is transcribed with Deepgram (`nova-3`, then `nova-2`). `/api/fast-decision` and `/api/chat-relay` run together. The opener plays from the preloaded buffer. If navigation confidence is at least 0.75, the page changes and shows the destination. The reply is spoken with ElevenLabs when the opener ends. Clicking the microphone again stops the audio.
