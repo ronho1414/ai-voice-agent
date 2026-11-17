@@ -13,10 +13,10 @@ npm run dev
 
 ## Clips
 
-Generate the filler clips offline, after the keys in `.env.example` exist in `.env`:
+Generate the filler clips offline once `ELEVENLABS_API_KEY` is set in the environment:
 
 ```bash
 npm run generate:clips
 ```
 
-The script reads `config/clips-config.json` and writes `public/clips/{intent}_{lang}.mp3` with ElevenLabs `eleven_flash_v2_5`. It does not run on install or on `npm run dev`.
+The script reads `config/clips-config.json` and writes `public/clips/{intent}_{lang}.mp3` with ElevenLabs `eleven_turbo_v4`, and falls back to `eleven_flash_v2_5` if that request fails. It reads the key only from `process.env.ELEVENLABS_API_KEY`. It does not run on install or on `npm run dev`.

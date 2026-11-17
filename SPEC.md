@@ -7,10 +7,10 @@
 
 ## 2. 技術棧與外部 API 規格
 * **前端框架**：沿用現有專案架構（Next.js / React + Tailwind CSS），音頻播放必須使用瀏覽器原生 **Web Audio API** 確保零延遲拼接。
-* **語音轉文字 (STT)**：Groq API (`whisper-large-v3-turbo`) — 負責快速識別粵/普/英及中英夾雜。
-* **決定模型 (Fast Path)**：TypeSafe AI **Jev API** (`jev-latest`) — 負責毫秒級多選題判斷（不生成文字）。
-* **生成大腦 (Slow Path)**：OpenRouter / Google Gemini (`gemini-2.5-flash`) — 負責結合知識庫生成口語化回覆。
-* **語音合成 (TTS)**：ElevenLabs (`eleven_flash_v2_5`) 或 Cantonese.ai API — 負責預錄短片及即時語音串流。
+* **語音轉文字 (STT)**：Deepgram（模型 `nova-3`，失敗時自動回退 `nova-2`）— 多語偵測 `zh-HK`、`zh-CN`、`en`。環境變數 `DEEPGRAM_API_KEY`。
+* **決定模型 (Fast Path)**：TypeSafe Jev（模型 `jev-latest`）— 負責毫秒級多選題判斷（不生成文字）。環境變數 `JEV_API_KEY`。
+* **生成大腦 (Slow Path)**：OpenRouter（模型 `google/gemini-2.5-flash`）— 負責結合知識庫生成口語化回覆。環境變數 `OPENROUTER_API_KEY`。
+* **語音合成 (TTS)**：只使用 ElevenLabs。預設 `model_id` 為 `eleven_turbo_v4`，失敗時自動回退 `eleven_flash_v2_5`。環境變數 `ELEVENLABS_API_KEY`（只從 `process.env` 讀取）。負責預錄短片及即時語音串流。
 
 ---
 

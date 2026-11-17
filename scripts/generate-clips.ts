@@ -2,16 +2,19 @@
  * Offline filler-clip generator.
  *
  * Reads config/clips-config.json and writes public/clips/{intent}_{lang}.mp3
- * with ElevenLabs eleven_flash_v2_5. Nothing in this file runs on import.
+ * with ElevenLabs model_id eleven_turbo_v4. If that request fails, the same
+ * text is retried with eleven_flash_v2_5. The API key is read only from
+ * process.env.ELEVENLABS_API_KEY. Nothing in this file runs on import.
  *
- *   npx tsx scripts/generate-clips.ts
+ *   npm run generate:clips
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const ELEVENLABS_MODEL_ID = "eleven_flash_v2_5";
+const ELEVENLABS_MODEL_ID = "eleven_turbo_v4";
+const ELEVENLABS_FALLBACK_MODEL_ID = "eleven_flash_v2_5";
 // Change this to the ElevenLabs voice that should speak the clips.
 const ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 
@@ -28,33 +31,6 @@ const LANGS: readonly ClipLang[] = ["yue", "zh", "en"];
 
 function repoRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-}
-
-function loadEnvFile(filePath: string): void {
-  let text: string;
-  try {
-    text = readFileSync(filePath, "utf8");
-  } catch {
-    return;
-  }
-
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    let value = trimmed.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    if (key && process.env[key] === undefined) {
-      process.env[key] = value;
-    }
-  }
 }
 
 function isClipLang(value: string): value is ClipLang {
@@ -95,9 +71,10 @@ function readClips(configPath: string): ClipConfigItem[] {
   });
 }
 
-async function synthesizeWithElevenLabs(
+async function requestElevenLabs(
   text: string,
   apiKey: string,
+  modelId: string,
 ): Promise<Uint8Array> {
   const response = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
@@ -110,22 +87,36 @@ async function synthesizeWithElevenLabs(
       },
       body: JSON.stringify({
         text,
-        model_id: ELEVENLABS_MODEL_ID,
+        model_id: modelId,
       }),
     },
   );
 
   if (!response.ok) {
-    throw new Error(`ElevenLabs TTS failed (${response.status})`);
+    throw new Error(`ElevenLabs TTS failed (${response.status}) for ${modelId}`);
   }
 
   return new Uint8Array(await response.arrayBuffer());
 }
 
+async function synthesizeWithElevenLabs(
+  text: string,
+  apiKey: string,
+): Promise<Uint8Array> {
+  try {
+    return await requestElevenLabs(text, apiKey, ELEVENLABS_MODEL_ID);
+  } catch (primaryError) {
+    const primaryMessage =
+      primaryError instanceof Error ? primaryError.message : String(primaryError);
+    console.error(
+      `${ELEVENLABS_MODEL_ID} failed, falling back to ${ELEVENLABS_FALLBACK_MODEL_ID}: ${primaryMessage}`,
+    );
+    return requestElevenLabs(text, apiKey, ELEVENLABS_FALLBACK_MODEL_ID);
+  }
+}
+
 async function main(): Promise<void> {
   const root = repoRoot();
-  loadEnvFile(path.join(root, ".env"));
-
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) {
     throw new Error("Set ELEVENLABS_API_KEY before generating clips.");
@@ -141,9 +132,6 @@ async function main(): Promise<void> {
       throw new Error(`Refusing to write outside public/clips: ${clip.file}`);
     }
 
-    // For lang === "yue", Cantonese.ai can be used instead of ElevenLabs.
-    // Send clip.clipText to the Cantonese.ai TTS API with CANTONESE_AI_API_KEY,
-    // write those MP3 bytes to outPath, and skip the ElevenLabs call below.
     const audio = await synthesizeWithElevenLabs(clip.clipText, apiKey);
     writeFileSync(outPath, audio);
     console.log(`wrote ${path.relative(root, outPath)}`);
