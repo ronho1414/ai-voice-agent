@@ -57,7 +57,7 @@ function limitSentences(text: string): string {
     .map((part) => part.trim())
     .filter(Boolean)
     .slice(0, 3)
-    .join("")
+    .join(" ")
     .trim();
 }
 

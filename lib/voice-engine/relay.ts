@@ -31,36 +31,46 @@ function readMessage(payload: unknown): string {
     .trim();
 }
 
+const REPLY_MODELS = ["google/gemini-2.5-flash", "deepseek/deepseek-chat"] as const;
+
 async function completeReply(system: string, text: string): Promise<string> {
   const apiKey = requireEnv("OPENROUTER_API_KEY");
-  let response: Response;
-  try {
-    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "X-Title": "AI Voice Agent",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        temperature: 0.2,
-        max_tokens: 180,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: text },
-        ],
-      }),
-      signal: AbortSignal.timeout(30_000),
-    });
-  } catch {
-    throw new Error("OpenRouter request failed (network)");
+  let lastStatus = 0;
+
+  for (const model of REPLY_MODELS) {
+    let response: Response;
+    try {
+      response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "X-Title": "AI Voice Agent",
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.2,
+          max_tokens: 180,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: text },
+          ],
+        }),
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch {
+      continue;
+    }
+
+    if (!response.ok) {
+      lastStatus = response.status;
+      await response.body?.cancel().catch(() => undefined);
+      continue;
+    }
+    return readMessage((await response.json()) as unknown);
   }
 
-  if (!response.ok) {
-    throw new Error(`OpenRouter request failed (${response.status})`);
-  }
-  return readMessage((await response.json()) as unknown);
+  throw new Error(lastStatus ? `OpenRouter request failed (${lastStatus})` : "OpenRouter request failed (network)");
 }
 
 export async function relayChat(
