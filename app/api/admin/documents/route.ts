@@ -1,4 +1,4 @@
-import { extractPdf } from "@/lib/admin/pdf";
+import { documentKind, extractDocument, mimeAllowed, storageExtension } from "@/lib/admin/extract";
 import { requireAdmin } from "@/lib/admin/guard";
 import { readSiteId } from "@/lib/admin/site";
 import { createDocument, deleteDocument, listDocuments, setDocumentActive } from "@/lib/admin/store";
@@ -8,16 +8,19 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_BYTES = 4 * 1024 * 1024;
+const UNSUPPORTED = "Only PDF, TXT, Markdown, DOCX, and CSV files are accepted";
 
 function siteFrom(request: Request): string {
   return readSiteId(new URL(request.url).searchParams.get("siteId"));
 }
 
-function pdfName(name: string): string {
-  const base = name.split(/[/\\]/).pop()?.trim() || "document.pdf";
-  const clean = base.replace(/[^\w.\- ()\u3400-\u9fff]+/g, "").slice(0, 180);
-  if (!clean.toLowerCase().endsWith(".pdf")) throw new Error("Only PDF files are accepted");
-  return clean;
+function acceptedName(name: string): string {
+  const base = name.split(/[/\\]/).pop()?.trim() || "document";
+  const clean = base.replace(/[^\w.\- ()\u3400-\u9fff]+/g, "");
+  const ext = storageExtension(clean);
+  if (!ext || !documentKind(clean)) throw new Error(UNSUPPORTED);
+  const stem = clean.slice(0, clean.length - ext.length).slice(0, 180 - ext.length) || "document";
+  return `${stem}${ext}`;
 }
 
 export async function GET(request: Request): Promise<Response> {
@@ -38,14 +41,13 @@ export async function POST(request: Request): Promise<Response> {
     const siteId = readSiteId(form.get("siteId"));
     const file = form.get("file");
     if (!(file instanceof File)) throw new Error("File is required");
-    const fileName = pdfName(file.name);
-    if (file.type && file.type !== "application/pdf" && file.type !== "application/octet-stream") {
-      throw new Error("Only PDF files are accepted");
-    }
+    const fileName = acceptedName(file.name);
+    const kind = documentKind(fileName);
+    if (!kind || !mimeAllowed(kind, file.type)) throw new Error(UNSUPPORTED);
     if (file.size <= 0) throw new Error("File is required");
     if (file.size > MAX_BYTES) throw new Error("File is too large");
     const bytes = Buffer.from(await file.arrayBuffer());
-    const extracted = await extractPdf(bytes);
+    const extracted = await extractDocument(kind, bytes);
     const saved = await createDocument({
       site_id: siteId,
       file_name: fileName,

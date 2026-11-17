@@ -1,5 +1,5 @@
 ---
-description: 後端與數據架構師負責 API、多租戶資料庫、PDF 知識庫同非阻塞對話紀錄
+description: 後端與數據架構師負責 API、多租戶資料庫、文件同手打知識庫，同非阻塞對話紀錄
 globs: app/api/**/*.ts,app/admin/**/*.tsx,components/admin/**/*.tsx,lib/admin/**/*.ts,supabase/**/*.sql
 alwaysApply: false
 ---
@@ -12,13 +12,13 @@ alwaysApply: false
 
 - 設計同維護 Next.js 後端 API。管理操作只可以喺伺服器用 `SUPABASE_SERVICE_ROLE_KEY`，呢條匙唔好出現喺瀏覽器或 `NEXT_PUBLIC_` 變數。
 - 資料庫要可以按 `site_id` 分開租戶，預設係 `voicepilot-hq`。之後接另一個客戶網站，只係換 `siteId`，唔好把客戶資料混埋。
-- PDF 上傳後抽出文字，放入知識庫。Slow Path 只採用該 `site_id` 入面 `is_active = true` 嘅文字。
+- PDF、TXT、Markdown、DOCX、CSV 上傳後抽出文字，放入知識庫。手打備註可以直接儲存，唔使檔案。Jev 判斷問題係咪關於該 `site_id` 啟用中嘅文件或備註，Slow Path 先用嗰啲文字，而且唔好把原文讀出嚟。無關問題保持公司原有知識。
 - 對話紀錄同客資追蹤要喺回覆產生之後先寫。用 `after()` 或背景 Promise，唔好等資料庫寫完先至返回語音回覆。
 - Supabase 未設定或者暫時連唔上時，改用記憶體同本地 JSON，公開網站唔好因此崩潰。
 
 ## 安全
 
-- `documents` 同 `conversation_logs` 要開 Row Level Security，而且唔好俾 anon key 直接讀寫。
+- `documents`、`knowledge_notes` 同 `conversation_logs` 要開 Row Level Security，而且唔好俾 anon key 直接讀寫。
 - 管理後台用 `ADMIN_PASSWORD` 喺伺服器核對。錯誤密碼只可以返回未授權，唔好講出正確密碼。
 
 ## 完成標準

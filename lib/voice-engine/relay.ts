@@ -1,7 +1,7 @@
-import { loadAnswerKnowledge } from "@/lib/admin/knowledge";
+import { resolveSpokenKnowledge } from "@/lib/admin/knowledge";
 import { requireEnv } from "@/lib/voice-engine/env";
 import { decideOpener } from "@/lib/voice-engine/decision";
-import { buildSystemPrompt, guardReply } from "@/lib/voice-engine/prompt";
+import { buildSystemPrompt, guardReply, recitesSource } from "@/lib/voice-engine/prompt";
 import type { ChatRelayResult, Lang, TurnContext } from "@/lib/voice-engine/types";
 
 function readMessage(payload: unknown): string {
@@ -31,7 +31,7 @@ function readMessage(payload: unknown): string {
     .trim();
 }
 
-const REPLY_MODELS = ["google/gemini-2.5-flash", "deepseek/deepseek-chat"] as const;
+const REPLY_MODELS = ["google/gemini-2.5-flash", "openai/gpt-4o-mini", "deepseek/deepseek-chat"] as const;
 
 async function completeReply(system: string, text: string): Promise<string> {
   const apiKey = requireEnv("OPENROUTER_API_KEY");
@@ -50,7 +50,8 @@ async function completeReply(system: string, text: string): Promise<string> {
         body: JSON.stringify({
           model,
           temperature: 0.2,
-          max_tokens: 180,
+          max_tokens: 120,
+          provider: { sort: "latency" },
           messages: [
             { role: "system", content: system },
             { role: "user", content: text },
@@ -81,19 +82,34 @@ export async function relayChat(
   siteId = "voicepilot-hq",
 ): Promise<ChatRelayResult> {
   const opener = spoken ?? (await decideOpener(text, context));
-  const knowledge = await loadAnswerKnowledge(siteId, knowledgeBasePath);
-  const system = buildSystemPrompt(knowledge, opener.clipText, opener.lang);
-  const raw = await completeReply(system, text);
+  const resolved = await resolveSpokenKnowledge(text, siteId, knowledgeBasePath);
+  const reply = await answerWithKnowledge(text, resolved.knowledge, opener.clipText, opener.lang, resolved);
   return {
-    reply: guardReply(raw, opener.clipText, opener.lang, knowledge),
+    reply,
     clipText: opener.clipText,
     lang: opener.lang,
   };
 }
 
+async function answerWithKnowledge(
+  text: string,
+  knowledge: string,
+  clipText: string,
+  lang: Lang,
+  resolved: { adminText: string; useAdminSources: boolean },
+): Promise<string> {
+  const system = buildSystemPrompt(knowledge, clipText, lang, resolved.useAdminSources);
+  let raw = await completeReply(system, text);
+  if (resolved.useAdminSources && recitesSource(raw, resolved.adminText)) {
+    raw = await completeReply(
+      `${system}\n\nThe previous draft read the source aloud. Answer the question again in your own words. Do not quote or repeat the note or document.`,
+      text,
+    );
+  }
+  return guardReply(raw, clipText, lang, knowledge);
+}
+
 export async function answerFromKnowledge(text: string, siteId: string): Promise<string> {
-  const knowledge = await loadAnswerKnowledge(siteId, "knowledge-base/company-info.md");
-  const system = buildSystemPrompt(knowledge, "", "yue");
-  const raw = await completeReply(system, text);
-  return guardReply(raw, "", "yue", knowledge);
+  const resolved = await resolveSpokenKnowledge(text, siteId, "knowledge-base/company-info.md");
+  return answerWithKnowledge(text, resolved.knowledge, "", "yue", resolved);
 }

@@ -9,7 +9,9 @@ const BAD_REQUEST = new Set([
   "Site is invalid",
   "Password is required",
   "File is required",
-  "Only PDF files are accepted",
+  "Only PDF, TXT, Markdown, DOCX, and CSV files are accepted",
+  "Document text could not be read",
+  "Note was not found",
   "File is too large",
   "Document was not found",
 ]);

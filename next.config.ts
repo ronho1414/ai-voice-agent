@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["pdf-parse"],
+  serverExternalPackages: ["pdf-parse", "mammoth"],
   outputFileTracingIncludes: {
     "/api/fast-decision": ["./config/**/*"],
     "/api/chat-relay": ["./config/**/*", "./knowledge-base/**/*"],

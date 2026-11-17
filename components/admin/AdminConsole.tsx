@@ -12,6 +12,13 @@ type DocumentItem = {
   created_at: string;
 };
 
+type NoteItem = {
+  id: string;
+  body: string;
+  is_active: boolean;
+  created_at: string;
+};
+
 type LogItem = {
   id: string;
   current_page: string;
@@ -70,6 +77,8 @@ export function AdminConsole() {
   const [tab, setTab] = useState<"knowledge" | "logs">("knowledge");
   const [mode, setMode] = useState<"supabase" | "local" | "">("");
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [notes, setNotes] = useState<NoteItem[]>([]);
+  const [noteDraft, setNoteDraft] = useState("");
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [summary, setSummary] = useState<Summary>({ total: 0, highIntent: 0, topPage: null });
   const [highIntentOnly, setHighIntentOnly] = useState(false);
@@ -80,15 +89,24 @@ export function AdminConsole() {
   const [error, setError] = useState("");
 
   const loadDocuments = useCallback(async () => {
-    const response = await fetch("/api/admin/documents", { cache: "no-store" });
-    if (response.status === 401) {
+    const [documentsResponse, notesResponse] = await Promise.all([
+      fetch("/api/admin/documents", { cache: "no-store" }),
+      fetch("/api/admin/notes", { cache: "no-store" }),
+    ]);
+    if (documentsResponse.status === 401 || notesResponse.status === 401) {
       setAuthenticated(false);
       return;
     }
-    if (!response.ok) throw new Error(await readError(response));
-    const body = (await response.json()) as { mode: "supabase" | "local"; documents: DocumentItem[] };
-    setMode(body.mode);
-    setDocuments(body.documents);
+    if (!documentsResponse.ok) throw new Error(await readError(documentsResponse));
+    if (!notesResponse.ok) throw new Error(await readError(notesResponse));
+    const documentsBody = (await documentsResponse.json()) as {
+      mode: "supabase" | "local";
+      documents: DocumentItem[];
+    };
+    const notesBody = (await notesResponse.json()) as { mode: "supabase" | "local"; notes: NoteItem[] };
+    setMode(documentsBody.mode === "local" || notesBody.mode === "local" ? "local" : documentsBody.mode);
+    setDocuments(documentsBody.documents);
+    setNotes(notesBody.notes);
   }, []);
 
   const loadLogs = useCallback(async (highIntent: boolean) => {
@@ -146,7 +164,56 @@ export function AdminConsole() {
     await fetch("/api/admin/session", { method: "DELETE" });
     setAuthenticated(false);
     setDocuments([]);
+    setNotes([]);
     setLogs([]);
+  }
+
+  async function saveNote(event: FormEvent) {
+    event.preventDefault();
+    const text = noteDraft.trim();
+    if (!text) return;
+    setBusy("note");
+    setError("");
+    try {
+      const response = await fetch("/api/admin/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, siteId: "voicepilot-hq" }),
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      setNoteDraft("");
+      await loadDocuments();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Request failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function toggleNote(item: NoteItem) {
+    setError("");
+    const response = await fetch("/api/admin/notes", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: item.id, isActive: !item.is_active, siteId: "voicepilot-hq" }),
+    });
+    if (!response.ok) {
+      setError(await readError(response));
+      return;
+    }
+    setNotes((current) => current.map((row) => (row.id === item.id ? { ...row, is_active: !row.is_active } : row)));
+  }
+
+  async function removeNote(item: NoteItem) {
+    const preview = item.body.replace(/\s+/g, " ").slice(0, 40);
+    if (!window.confirm(`刪除呢段備註？${preview}`)) return;
+    setError("");
+    const response = await fetch(`/api/admin/notes?id=${encodeURIComponent(item.id)}`, { method: "DELETE" });
+    if (!response.ok) {
+      setError(await readError(response));
+      return;
+    }
+    setNotes((current) => current.filter((row) => row.id !== item.id));
   }
 
   async function upload(file: File) {
@@ -231,7 +298,7 @@ export function AdminConsole() {
             <p className="text-sm font-semibold text-[#635BFF]">VoicePilot AI</p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight">企業管理員後台</h1>
             <p className="mt-2 max-w-2xl text-sm text-[#425466]">
-              管理知識庫 PDF，同埋睇訪客對話。語音開場白唔會等資料庫寫完先至出聲。
+              管理知識庫檔案同手打備註，同埋睇訪客對話。語音開場白唔會等資料庫寫完先至出聲。
             </p>
           </div>
           {authenticated ? (
@@ -291,7 +358,63 @@ export function AdminConsole() {
             </div>
 
             {tab === "knowledge" ? (
-              <section className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+              <section className="flex flex-col gap-4">
+                <form onSubmit={saveNote} className="rounded-2xl border border-[#E6EBF1] bg-white p-5 shadow-stripe-sm">
+                  <h2 className="text-lg font-semibold">直接輸入知識</h2>
+                  <p className="mt-2 text-sm text-[#425466]">打字或者貼上一段資料，儲存之後可以開關同刪除。</p>
+                  <label className="mt-4 block text-sm font-medium" htmlFor="knowledge-note">
+                    備註內容
+                  </label>
+                  <textarea
+                    id="knowledge-note"
+                    value={noteDraft}
+                    onChange={(event) => setNoteDraft(event.target.value)}
+                    rows={5}
+                    placeholder="例如：Growth 年費預繳之後，語音專員可以講邊幾項優惠。"
+                    className="mt-2 w-full resize-y rounded-xl border border-[#E6EBF1] bg-[#F6F9FC] px-3 py-3 text-sm outline-none focus:border-[#635BFF]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={busy === "note" || noteDraft.trim() === ""}
+                    className="mt-3 rounded-full bg-[#635BFF] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {busy === "note" ? "儲存緊…" : "儲存備註"}
+                  </button>
+                  <ul className="mt-4 divide-y divide-[#E6EBF1]">
+                    {notes.length === 0 ? (
+                      <li className="py-4 text-sm text-[#425466]">未有手打備註。</li>
+                    ) : null}
+                    {notes.map((item) => (
+                      <li key={item.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start">
+                        <div className="min-w-0 flex-1">
+                          <p className="max-h-32 overflow-auto whitespace-pre-wrap text-sm leading-6">{item.body}</p>
+                          <p className="mt-1 text-xs text-[#425466]">
+                            {item.body.length.toLocaleString("zh-HK")} 字 · {formatWhen(item.created_at)}
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void toggleNote(item)}
+                            className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                              item.is_active ? "bg-[#635BFF] text-white" : "bg-[#E6EBF1] text-[#425466]"
+                            }`}
+                          >
+                            {item.is_active ? "啟用中" : "已停用"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void removeNote(item)}
+                            className="rounded-full border border-[#E6EBF1] px-3 py-1.5 text-xs font-semibold"
+                          >
+                            刪除
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </form>
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
                 <div className="rounded-2xl border border-[#E6EBF1] bg-white p-5 shadow-stripe-sm">
                   <label
                     onDragOver={(event) => {
@@ -304,11 +427,13 @@ export function AdminConsole() {
                       dragging ? "border-[#635BFF] bg-[#635BFF]/5" : "border-[#E6EBF1] bg-[#F6F9FC]"
                     }`}
                   >
-                    <span className="text-sm font-semibold">拖放 PDF 到呢度，或者撳一下揀檔</span>
-                    <span className="mt-2 text-xs text-[#425466]">只接受 .pdf，上限 4 MB。上傳後會抽出文字。</span>
+                    <span className="text-sm font-semibold">拖放檔案到呢度，或者撳一下揀檔</span>
+                    <span className="mt-2 text-xs text-[#425466]">
+                      接受 PDF、TXT、Markdown、DOCX、CSV，上限 4 MB。上傳後會抽出文字。
+                    </span>
                     <input
                       type="file"
-                      accept="application/pdf,.pdf"
+                      accept=".pdf,.txt,.md,.markdown,.docx,.csv,application/pdf,text/plain,text/markdown,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                       className="sr-only"
                       onChange={(event) => {
                         const file = event.target.files?.[0];
@@ -320,14 +445,15 @@ export function AdminConsole() {
                   <p className="mt-3 text-xs text-[#425466]">{busy === "upload" ? "上傳同抽文字進行緊…" : ""}</p>
                   <ul className="mt-4 divide-y divide-[#E6EBF1]">
                     {documents.length === 0 ? (
-                      <li className="py-6 text-sm text-[#425466]">未有檔案。未上傳之前，語音會用原有公司資料。</li>
+                      <li className="py-6 text-sm text-[#425466]">未有檔案。未有啟用檔案同備註時，語音會用原有公司資料。</li>
                     ) : null}
                     {documents.map((item) => (
                       <li key={item.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center">
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-semibold">{item.file_name}</p>
                           <p className="mt-1 text-xs text-[#425466]">
-                            {item.page_count} 頁 · {item.char_count.toLocaleString("zh-HK")} 字 · {formatSize(item.file_size)} ·{" "}
+                            {item.page_count > 0 ? `${item.page_count} 頁 · ` : ""}
+                            {item.char_count.toLocaleString("zh-HK")} 字 · {formatSize(item.file_size)} ·{" "}
                             {formatWhen(item.created_at)}
                           </p>
                         </div>
@@ -355,7 +481,9 @@ export function AdminConsole() {
                 </div>
                 <form onSubmit={ask} className="rounded-2xl border border-[#E6EBF1] bg-white p-5 shadow-stripe-sm">
                   <h2 className="text-lg font-semibold">測試知識庫問答</h2>
-                  <p className="mt-2 text-sm text-[#425466]">用而家啟用緊嘅 PDF 文字回答。沒有啟用檔案時，會用公司原有資料。</p>
+                  <p className="mt-2 text-sm text-[#425466]">
+                    問題關於啟用中嘅檔案或手打備註，先會用嗰啲資料答，而且唔會把原文讀出嚟。其他問題用公司原有資料。
+                  </p>
                   <textarea
                     value={question}
                     onChange={(event) => setQuestion(event.target.value)}
@@ -372,6 +500,7 @@ export function AdminConsole() {
                   </button>
                   {answer ? <p className="mt-4 rounded-xl bg-[#F6F9FC] p-4 text-sm leading-6">{answer}</p> : null}
                 </form>
+                </div>
               </section>
             ) : (
               <section className="flex flex-col gap-4">

@@ -1,4 +1,5 @@
 import { clipFor } from "@/lib/voice-engine/clips-config";
+import { matchLocalFast } from "@/lib/voice-engine/local-fast";
 import { requireEnv } from "@/lib/voice-engine/env";
 import { loadClipsConfig, loadSiteMap } from "@/lib/voice-engine/read-config";
 import { selectRoute, type SiteMap } from "@/lib/voice-engine/site-map";
@@ -277,11 +278,40 @@ function navigationFor(intent: Intent, siteMap: SiteMap) {
   };
 }
 
+export async function decideAboutAdminSources(text: string, sourceBrief: string): Promise<boolean> {
+  const brief = sourceBrief.trim();
+  if (!brief) return false;
+  try {
+    const answers = await jevChoices(
+      {
+        utterance: text,
+        sources: brief,
+      },
+      {
+        about_sources: {
+          type: "choice",
+          instructions:
+            "Decide whether the guest is asking about the active uploaded documents or typed notes in sources. Choose yes only when the question is about that material. Choose no for greetings, company introduction, plans, prices, booking, timelines, and anything those sources do not cover. Do not choose yes just because sources exist.",
+          criteria: {
+            yes: "The question is about the content of the active uploaded documents or typed notes.",
+            no: "The question is not about those sources.",
+          },
+        },
+      },
+    );
+    return readChoice(answers.about_sources, ["yes", "no"]).choice === "yes";
+  } catch {
+    return false;
+  }
+}
+
 export async function decideFast(
   text: string,
   siteMap: SiteMap = loadSiteMap(),
   context: TurnContext = DEFAULT_CONTEXT,
 ): Promise<FastDecision> {
+  const local = matchLocalFast(text, siteMap, context);
+  if (local) return local;
   const [opener, route] = await Promise.all([decideOpener(text, context), decideRoute(text, siteMap)]);
   const stay =
     opener.intent === "follow_up_ack" || opener.intent === "follow_up_detail"

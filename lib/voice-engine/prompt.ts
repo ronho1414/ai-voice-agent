@@ -32,7 +32,12 @@ export function continuationLine(clipText: string, lang: Lang): string {
   return `You already said this opening half to the visitor: "${clipText}". Continue that sentence in the same tone. Do not greet again and do not repeat the first half.`;
 }
 
-export function buildSystemPrompt(knowledge: string, clipText: string, lang: Lang): string {
+export function buildSystemPrompt(
+  knowledge: string,
+  clipText: string,
+  lang: Lang,
+  useAdminSources = false,
+): string {
   return [
     "You are a senior AI voice-solution specialist for VoicePilot AI（領聲智導）.",
     "You are not a clinic receptionist. Do not mention clinics, medical treatments, or beauty services.",
@@ -40,14 +45,34 @@ export function buildSystemPrompt(knowledge: string, clipText: string, lang: Lan
     knowledge.trim(),
     continuationLine(clipText, lang),
     LANGUAGE_RULE[lang],
-    "Reply in 2 or 3 spoken sentences.",
+    "Reply in 2 or 3 short spoken sentences, about 40 to 70 characters in total.",
     "Do not output Markdown or symbols such as *, #, or bullet lists.",
     "If the knowledge base does not contain the fact, say you will note it and someone will follow up. Do not invent facts.",
     "Quote only prices written in the knowledge base. Do not invent another amount.",
     "Do not greet again and do not repeat the opener.",
+    useAdminSources
+      ? "The question is about the uploaded documents or typed notes included above. Answer it from that material in your own spoken words. Do not read a note or document aloud, do not quote it, and do not repeat it as a script. Use only the part that answers the question. Company knowledge still applies."
+      : "",
   ]
     .filter((line) => line.trim().length > 0)
     .join("\n\n");
+}
+
+export function recitesSource(reply: string, source: string): boolean {
+  const spoken = reply.replace(/\s+/g, "").trim();
+  const material = source.replace(/\s+/g, "").trim();
+  if (spoken.length < 16 || material.length < 16) return false;
+  if (spoken.includes(material)) return true;
+  if (material.includes(spoken) && spoken.length >= Math.min(material.length, 40)) return true;
+  const window = 24;
+  if (spoken.length < window) return false;
+  let hits = 0;
+  let samples = 0;
+  for (let index = 0; index + window <= spoken.length; index += 8) {
+    samples += 1;
+    if (material.includes(spoken.slice(index, index + window))) hits += 1;
+  }
+  return samples > 0 && hits / samples >= 0.6;
 }
 
 export function sanitizeSpokenReply(text: string): string {

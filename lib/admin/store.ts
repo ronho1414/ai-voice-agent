@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { contentTypeFor, documentKind, storageExtension } from "@/lib/admin/extract";
 
 export type StoreMode = "supabase" | "local";
 
@@ -17,6 +18,14 @@ export type DocumentRecord = {
 
 export type DocumentSummary = Omit<DocumentRecord, "extracted_text"> & {
   char_count: number;
+};
+
+export type NoteRecord = {
+  id: string;
+  site_id: string;
+  body: string;
+  is_active: boolean;
+  created_at: string;
 };
 
 export type ConversationRecord = {
@@ -40,10 +49,12 @@ export type LogSummary = {
 
 type LocalStore = {
   documents: DocumentRecord[];
+  notes: NoteRecord[];
   logs: ConversationRecord[];
 };
 
-const EMPTY: LocalStore = { documents: [], logs: [] };
+const EMPTY: LocalStore = { documents: [], notes: [], logs: [] };
+const STORAGE_EXTS = [".pdf", ".txt", ".md", ".markdown", ".docx", ".csv"];
 const TEXT_LIMIT = 200_000;
 const KNOWLEDGE_LIMIT = 16_000;
 const QUERY_TIMEOUT_MS = 1_500;
@@ -82,17 +93,22 @@ async function hydrate(): Promise<void> {
     const parsed = JSON.parse(raw) as Partial<LocalStore>;
     memory = {
       documents: Array.isArray(parsed.documents) ? parsed.documents : [],
+      notes: Array.isArray(parsed.notes) ? parsed.notes : [],
       logs: Array.isArray(parsed.logs) ? parsed.logs : [],
     };
   } catch {
-    memory = { documents: [], logs: [] };
+    memory = { documents: [], notes: [], logs: [] };
   }
 }
 
 async function readLocal(): Promise<LocalStore> {
   return enqueue(async () => {
     await hydrate();
-    return { documents: memory.documents.slice(), logs: memory.logs.slice() };
+    return {
+      documents: memory.documents.slice(),
+      notes: memory.notes.slice(),
+      logs: memory.logs.slice(),
+    };
   });
 }
 
@@ -169,11 +185,12 @@ export async function createDocument(
   }
 
   if (input.bytes) {
-    const storagePath = `${document.site_id}/${document.id}.pdf`;
+    const kind = documentKind(document.file_name);
+    const storagePath = `${document.site_id}/${document.id}${storageExtension(document.file_name)}`;
     await supabase.storage
       .from("knowledge-documents")
       .upload(storagePath, input.bytes, {
-        contentType: "application/pdf",
+        contentType: kind ? contentTypeFor(kind) : "application/octet-stream",
         upsert: false,
       })
       .then(() => undefined, () => undefined);
@@ -241,35 +258,116 @@ export async function deleteDocument(siteId: string, id: string): Promise<StoreM
     return "local";
   }
 
-  await supabase.storage.from("knowledge-documents").remove([`${siteId}/${id}.pdf`]);
+  await supabase.storage
+    .from("knowledge-documents")
+    .remove(STORAGE_EXTS.map((ext) => `${siteId}/${id}${ext}`));
   const { data, error } = await supabase.from("documents").delete().eq("id", id).eq("site_id", siteId).select("id");
   if (error) throw new Error("Document delete failed");
   if (!data || data.length === 0) throw new Error("Document was not found");
   return "supabase";
 }
 
+export async function listNotes(siteId: string): Promise<{ mode: StoreMode; notes: NoteRecord[] }> {
+  const supabase = supabaseAdmin();
+  if (!supabase) {
+    const store = await readLocal();
+    return { mode: "local", notes: store.notes.filter((item) => item.site_id === siteId) };
+  }
+  const { data, error } = await supabase
+    .from("knowledge_notes")
+    .select("id,site_id,body,is_active,created_at")
+    .eq("site_id", siteId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    const store = await readLocal();
+    return { mode: "local", notes: store.notes.filter((item) => item.site_id === siteId) };
+  }
+  return { mode: "supabase", notes: (data ?? []) as NoteRecord[] };
+}
+
+export async function createNote(input: { site_id: string; body: string }): Promise<{ mode: StoreMode; note: NoteRecord }> {
+  const body = input.body.trim().slice(0, TEXT_LIMIT);
+  if (!body) throw new Error("Text is required");
+  const note: NoteRecord = {
+    id: crypto.randomUUID(),
+    site_id: input.site_id,
+    body,
+    is_active: true,
+    created_at: new Date().toISOString(),
+  };
+  const supabase = supabaseAdmin();
+  if (!supabase) {
+    await changeLocal((store) => ({ ...store, notes: [note, ...store.notes] }));
+    return { mode: "local", note };
+  }
+  const { error } = await supabase.from("knowledge_notes").insert(note);
+  if (error) {
+    await changeLocal((store) => ({ ...store, notes: [note, ...store.notes] }));
+    return { mode: "local", note };
+  }
+  return { mode: "supabase", note };
+}
+
+export async function setNoteActive(siteId: string, id: string, isActive: boolean): Promise<StoreMode> {
+  const supabase = supabaseAdmin();
+  if (!supabase) {
+    let found = false;
+    await changeLocal((store) => {
+      found = store.notes.some((item) => item.id === id && item.site_id === siteId);
+      if (!found) return store;
+      return {
+        ...store,
+        notes: store.notes.map((item) =>
+          item.id === id && item.site_id === siteId ? { ...item, is_active: isActive } : item,
+        ),
+      };
+    });
+    if (!found) throw new Error("Note was not found");
+    return "local";
+  }
+  const { data, error } = await supabase
+    .from("knowledge_notes")
+    .update({ is_active: isActive })
+    .eq("id", id)
+    .eq("site_id", siteId)
+    .select("id");
+  if (error) throw new Error("Note update failed");
+  if (!data || data.length === 0) throw new Error("Note was not found");
+  return "supabase";
+}
+
+export async function deleteNote(siteId: string, id: string): Promise<StoreMode> {
+  const supabase = supabaseAdmin();
+  if (!supabase) {
+    let found = false;
+    await changeLocal((store) => {
+      found = store.notes.some((item) => item.id === id && item.site_id === siteId);
+      if (!found) return store;
+      return {
+        ...store,
+        notes: store.notes.filter((item) => !(item.id === id && item.site_id === siteId)),
+      };
+    });
+    if (!found) throw new Error("Note was not found");
+    return "local";
+  }
+  const { data, error } = await supabase.from("knowledge_notes").delete().eq("id", id).eq("site_id", siteId).select("id");
+  if (error) throw new Error("Note delete failed");
+  if (!data || data.length === 0) throw new Error("Note was not found");
+  return "supabase";
+}
+
 export async function activeKnowledge(siteId: string): Promise<string | null> {
   const load = async (): Promise<string | null> => {
     const supabase = supabaseAdmin();
-    const documents = supabase
-      ? await activeFromSupabase(supabase, siteId)
-      : (await readLocal()).documents.filter((item) => item.site_id === siteId && item.is_active);
-    if (documents.length === 0) return null;
-    let used = 0;
-    const parts: string[] = [];
-    for (const document of documents) {
-      const text = document.extracted_text.trim();
-      if (!text) continue;
-      const block = `${document.file_name}\n${text}`;
-      if (used + block.length > KNOWLEDGE_LIMIT) {
-        parts.push(block.slice(0, Math.max(0, KNOWLEDGE_LIMIT - used)));
-        break;
-      }
-      parts.push(block);
-      used += block.length;
-    }
-    const text = parts.join("\n\n").trim();
-    return text || null;
+    const local = supabase ? null : await readLocal();
+    const documents = local
+      ? local.documents.filter((item) => item.site_id === siteId && item.is_active)
+      : await activeDocuments(supabase!, siteId);
+    const notes = local
+      ? local.notes.filter((item) => item.site_id === siteId && item.is_active)
+      : await activeNotes(supabase!, siteId);
+    return packKnowledge(notes, documents);
   };
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -287,15 +385,60 @@ export async function activeKnowledge(siteId: string): Promise<string | null> {
   }
 }
 
-async function activeFromSupabase(supabase: SupabaseClient, siteId: string): Promise<DocumentRecord[]> {
-  const { data, error } = await supabase
-    .from("documents")
-    .select("id,site_id,file_name,file_size,extracted_text,page_count,is_active,created_at")
-    .eq("site_id", siteId)
-    .eq("is_active", true)
-    .order("created_at", { ascending: false });
-  if (error) throw new Error("Knowledge read failed");
-  return (data ?? []) as DocumentRecord[];
+function packKnowledge(notes: NoteRecord[], documents: DocumentRecord[]): string | null {
+  const blocks = [
+    ...notes.map((note) => ({ title: "手打備註", text: note.body })),
+    ...documents.map((document) => ({ title: document.file_name, text: document.extracted_text })),
+  ];
+  let used = 0;
+  const parts: string[] = [];
+  for (const block of blocks) {
+    const text = block.text.trim();
+    if (!text) continue;
+    const chunk = `${block.title}\n${text}`;
+    const room = KNOWLEDGE_LIMIT - used;
+    if (room <= 0) break;
+    if (chunk.length > room) {
+      parts.push(chunk.slice(0, room));
+      break;
+    }
+    parts.push(chunk);
+    used += chunk.length;
+  }
+  const text = parts.join("\n\n").trim();
+  return text || null;
+}
+
+async function activeDocuments(supabase: SupabaseClient, siteId: string): Promise<DocumentRecord[]> {
+  try {
+    const { data, error } = await supabase
+      .from("documents")
+      .select("id,site_id,file_name,file_size,extracted_text,page_count,is_active,created_at")
+      .eq("site_id", siteId)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+    if (error) throw new Error("Knowledge read failed");
+    return (data ?? []) as DocumentRecord[];
+  } catch {
+    const store = await readLocal();
+    return store.documents.filter((item) => item.site_id === siteId && item.is_active);
+  }
+}
+
+async function activeNotes(supabase: SupabaseClient, siteId: string): Promise<NoteRecord[]> {
+  try {
+    const { data, error } = await supabase
+      .from("knowledge_notes")
+      .select("id,site_id,body,is_active,created_at")
+      .eq("site_id", siteId)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+    if (error) throw new Error("Knowledge read failed");
+    return (data ?? []) as NoteRecord[];
+  } catch {
+    const store = await readLocal();
+    return store.notes.filter((item) => item.site_id === siteId && item.is_active);
+  }
 }
 
 export async function insertConversation(record: ConversationRecord): Promise<void> {
