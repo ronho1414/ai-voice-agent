@@ -4,6 +4,8 @@ const BAD_REQUEST = new Set([
   "Audio is required",
   "Audio is too large",
   "Language is required",
+  "Voice is invalid",
+  "Knowledge base path is invalid",
 ]);
 
 export function fail(error: unknown): Response {

@@ -12,8 +12,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { synthesizeSpeech } from "@/lib/elevenlabs";
-import { loadClipsConfig } from "@/lib/read-config";
+import { synthesizeSpeech } from "@/lib/voice-engine/elevenlabs";
+import { loadClipsConfig } from "@/lib/voice-engine/read-config";
 
 function repoRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

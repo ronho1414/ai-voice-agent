@@ -1,4 +1,4 @@
-import { isIntent, isLang, type Intent, type Lang } from "@/lib/types";
+import { isIntent, isLang, type Intent, type Lang } from "@/lib/voice-engine/types";
 
 export type VoiceSetting = {
   voiceId: string;

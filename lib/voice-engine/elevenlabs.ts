@@ -1,5 +1,5 @@
-import { requireEnv } from "@/lib/env";
-import type { VoiceSetting } from "@/lib/clips-config";
+import { requireEnv } from "@/lib/voice-engine/env";
+import type { VoiceSetting } from "@/lib/voice-engine/clips-config";
 
 // The spec names eleven_turbo_v4. ElevenLabs serves that turbo model as eleven_v4_turbo.
 const TTS_MODELS = ["eleven_turbo_v4", "eleven_v4_turbo", "eleven_flash_v2_5"] as const;

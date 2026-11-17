@@ -1,5 +1,5 @@
 import { fail, json } from "@/lib/http";
-import { transcribeAudio } from "@/lib/stt";
+import { transcribeAudio } from "@/lib/voice-engine/stt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

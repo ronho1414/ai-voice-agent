@@ -1,8 +1,8 @@
-import { requireEnv } from "@/lib/env";
-import { loadKnowledge } from "@/lib/read-config";
-import { decideOpener } from "@/lib/decision";
-import { buildSystemPrompt, guardReply } from "@/lib/prompt";
-import type { ChatRelayResult } from "@/lib/types";
+import { requireEnv } from "@/lib/voice-engine/env";
+import { loadKnowledgeFile } from "@/lib/voice-engine/read-config";
+import { decideOpener } from "@/lib/voice-engine/decision";
+import { buildSystemPrompt, guardReply } from "@/lib/voice-engine/prompt";
+import type { ChatRelayResult } from "@/lib/voice-engine/types";
 
 function readMessage(payload: unknown): string {
   if (typeof payload !== "object" || payload === null) {
@@ -63,9 +63,12 @@ async function completeReply(system: string, text: string): Promise<string> {
   return readMessage((await response.json()) as unknown);
 }
 
-export async function relayChat(text: string): Promise<ChatRelayResult> {
+export async function relayChat(
+  text: string,
+  knowledgeBasePath = "knowledge-base/company-info.md",
+): Promise<ChatRelayResult> {
   const opener = await decideOpener(text);
-  const knowledge = loadKnowledge();
+  const knowledge = loadKnowledgeFile(knowledgeBasePath);
   const system = buildSystemPrompt(knowledge, opener.clipText, opener.lang);
   const raw = await completeReply(system, text);
   return {

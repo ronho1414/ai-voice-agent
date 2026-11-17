@@ -1,4 +1,4 @@
-import { requireEnv } from "@/lib/env";
+import { requireEnv } from "@/lib/voice-engine/env";
 
 const ATTEMPTS = [
   "model=nova-3&language=multi&language_hint=zh-HK&language_hint=zh-CN&language_hint=en&smart_format=true",

@@ -1,16 +1,19 @@
-import { voiceFor } from "@/lib/clips-config";
-import { openSpeechStream } from "@/lib/elevenlabs";
 import { fail } from "@/lib/http";
-import { loadClipsConfig } from "@/lib/read-config";
-import { readSpeechRequest } from "@/lib/utterance";
+import { voiceFor } from "@/lib/voice-engine/clips-config";
+import { openSpeechStream } from "@/lib/voice-engine/elevenlabs";
+import { loadClipsConfig } from "@/lib/voice-engine/read-config";
+import { readSpeechRequest, readVoiceId } from "@/lib/voice-engine/utterance";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request): Promise<Response> {
   try {
-    const { text, lang } = readSpeechRequest((await request.json()) as unknown);
-    const voice = voiceFor(loadClipsConfig(), lang);
+    const body: unknown = await request.json();
+    const { text, lang } = readSpeechRequest(body);
+    const voiceId = readVoiceId(body);
+    const configured = voiceFor(loadClipsConfig(), lang);
+    const voice = voiceId ? { ...configured, voiceId } : configured;
     const upstream = await openSpeechStream({ voice, text });
     return new Response(upstream.body, {
       headers: {

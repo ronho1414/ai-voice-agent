@@ -203,13 +203,15 @@ export class AudioQueue {
 
 export async function preloadClips(
   context: AudioContext,
-  files: string[],
+  files: readonly string[],
+  basePath = "/clips",
 ): Promise<Map<string, AudioBuffer>> {
   const buffers = new Map<string, AudioBuffer>();
+  const prefix = basePath.replace(/\/$/, "");
   await Promise.all(
     files.map(async (file) => {
       try {
-        const response = await fetch(`/clips/${file}`);
+        const response = await fetch(`${prefix}/${file}`);
         if (!response.ok) return;
         const encoded = await response.arrayBuffer();
         const audio = await context.decodeAudioData(encoded.slice(0));

@@ -1,8 +1,8 @@
-import { clipFor } from "@/lib/clips-config";
-import { requireEnv } from "@/lib/env";
-import { loadClipsConfig, loadSiteMap } from "@/lib/read-config";
-import { selectRoute, type SiteMap } from "@/lib/site-map";
-import { isIntent, isLang, type FastDecision, type Intent, type Lang } from "@/lib/types";
+import { clipFor } from "@/lib/voice-engine/clips-config";
+import { requireEnv } from "@/lib/voice-engine/env";
+import { loadClipsConfig, loadSiteMap } from "@/lib/voice-engine/read-config";
+import { selectRoute, type SiteMap } from "@/lib/voice-engine/site-map";
+import { isIntent, isLang, type FastDecision, type Intent, type Lang } from "@/lib/voice-engine/types";
 
 type ChoiceAnswer = {
   choice: string;
@@ -172,12 +172,14 @@ function routeCriteria(siteMap: SiteMap): Record<string, string> {
   return criteria;
 }
 
-async function decideRoute(text: string): Promise<{
+async function decideRoute(
+  text: string,
+  siteMap: SiteMap,
+): Promise<{
   navigateUrl: string;
   pageName: string | null;
   confidence: number;
 }> {
-  const siteMap = loadSiteMap();
   const criteria = routeCriteria(siteMap);
   const answers = await jevChoices(
     {
@@ -201,8 +203,8 @@ async function decideRoute(text: string): Promise<{
   return selectRoute(answer.choice, answer.confidence, siteMap);
 }
 
-export async function decideFast(text: string): Promise<FastDecision> {
-  const [opener, route] = await Promise.all([decideOpener(text), decideRoute(text)]);
+export async function decideFast(text: string, siteMap: SiteMap = loadSiteMap()): Promise<FastDecision> {
+  const [opener, route] = await Promise.all([decideOpener(text), decideRoute(text, siteMap)]);
   return {
     intent: opener.intent,
     lang: opener.lang,

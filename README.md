@@ -1,6 +1,8 @@
 # AI Voice Agent
 
-Trilingual clinic voice agent (Cantonese, Mandarin, English). The spec is in `SPEC.md`.
+VoicePilot AI（領聲智導）marketing site with a trilingual voice agent (Cantonese, Mandarin, English). The spec is in `SPEC.md`.
+
+The company shell is `app/page.tsx`. Voice behavior lives in `components/voice-widget/` and `lib/voice-engine/`. The page passes the knowledge base path, site map, voice id, and clip files into the widget.
 
 A short opener plays from memory while the answer is generated, then the spoken reply starts as soon as that opener ends.
 
@@ -30,4 +32,4 @@ The script writes `public/clips/{intent}_{lang}.mp3`. It tries ElevenLabs `eleve
 
 ## Talk
 
-Use the microphone on the page. Speech is transcribed with Deepgram (`nova-3`, then `nova-2`). `/api/fast-decision` and `/api/chat-relay` run together. The opener plays from the preloaded buffer. If navigation confidence is at least 0.75, the page changes and shows the destination. The reply is spoken with ElevenLabs when the opener ends. Clicking the microphone again stops the audio.
+Open the voice panel from **立即語音體驗** (`#open-voice-demo-btn`) or the bottom-right assistant. Speech is transcribed with Deepgram (`nova-3`, then `nova-2`). `/api/fast-decision` and `/api/chat-relay` run together. The opener plays from the preloaded buffer. If navigation confidence is at least 0.75, the page changes and shows the destination. The reply is spoken with ElevenLabs when the opener ends. Clicking the microphone again stops the audio.

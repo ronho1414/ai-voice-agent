@@ -1,4 +1,4 @@
-import type { Lang } from "@/lib/types";
+import type { Lang } from "@/lib/voice-engine/types";
 
 const LANGUAGE_RULE: Record<Lang, string> = {
   yue: "Reply in spoken Hong Kong Cantonese. Use words such as 係、唔係、嘅、咗、喺. Do not use written Chinese.",

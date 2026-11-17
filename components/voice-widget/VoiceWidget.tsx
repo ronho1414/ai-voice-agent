@@ -2,12 +2,20 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import clipsFile from "@/config/clips-config.json";
-import { AudioQueue, preloadClips, type AudioQueueState } from "@/lib/audio-queue";
-import { parseClipsConfig } from "@/lib/clips-config";
-import { isIntent, isLang, type ChatRelayResult, type FastDecision } from "@/lib/types";
+import { createPortal } from "react-dom";
+import { AudioQueue, preloadClips, type AudioQueueState } from "@/lib/voice-engine/audio-queue";
+import type { SiteMap } from "@/lib/voice-engine/site-map";
+import { isIntent, isLang, type ChatRelayResult, type FastDecision } from "@/lib/voice-engine/types";
 
-const CLIP_FILES = parseClipsConfig(clipsFile).clips.map((clip) => clip.file);
+const MOUNT_ID = "CURSOR_VOICE_WIDGET_MOUNT_POINT";
+
+export type VoiceWidgetProps = {
+  knowledgeBasePath: string;
+  siteMap: SiteMap;
+  voiceId: string;
+  clips: readonly string[];
+  clipsBasePath?: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -61,9 +69,35 @@ function readRelay(value: unknown): ChatRelayResult {
   return { reply, clipText, lang };
 }
 
-export function VoiceAgent() {
+function useMountNode(id: string, pathname: string): HTMLElement | null {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    let current = document.getElementById(id);
+    setNode(current);
+    const observer = new MutationObserver(() => {
+      const next = document.getElementById(id);
+      if (next === current) return;
+      current = next;
+      setNode(next);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [id, pathname]);
+
+  return node;
+}
+
+export function VoiceWidget({
+  knowledgeBasePath,
+  siteMap,
+  voiceId,
+  clips,
+  clipsBasePath = "/clips",
+}: VoiceWidgetProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const mountNode = useMountNode(MOUNT_ID, pathname);
   const queueRef = useRef<AudioQueue | null>(null);
   const buffersRef = useRef<Map<string, AudioBuffer>>(new Map());
   const abortRef = useRef<AbortController | null>(null);
@@ -74,10 +108,12 @@ export function VoiceAgent() {
   const [clipCount, setClipCount] = useState(0);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [open, setOpen] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [transcript, setTranscript] = useState("");
   const [reply, setReply] = useState("");
   const [error, setError] = useState("");
+  const clipKey = clips.join("|");
 
   useEffect(() => {
     const context = new AudioContext();
@@ -87,7 +123,7 @@ export function VoiceAgent() {
     const unsubscribe = queue.subscribe((state) => {
       if (active) setQueueState(state);
     });
-    void preloadClips(context, CLIP_FILES).then((buffers) => {
+    void preloadClips(context, clips, clipsBasePath).then((buffers) => {
       if (!active) return;
       buffersRef.current = buffers;
       setClipCount(buffers.size);
@@ -98,12 +134,30 @@ export function VoiceAgent() {
       queue.bargeIn();
       void context.close();
     };
-  }, []);
+    // clipKey tracks the configured file list. clips is read for this render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clipKey, clipsBasePath]);
 
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
       streamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  useEffect(() => {
+    const openPanel = () => setOpen(true);
+    const onClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest("#open-voice-demo-btn")) {
+        setOpen(true);
+      }
+    };
+    window.addEventListener("voicepilot:open-widget", openPanel);
+    document.addEventListener("click", onClick);
+    return () => {
+      window.removeEventListener("voicepilot:open-widget", openPanel);
+      document.removeEventListener("click", onClick);
     };
   }, []);
 
@@ -114,7 +168,7 @@ export function VoiceAgent() {
     const response = await fetch("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: result.reply, lang: result.lang }),
+      body: JSON.stringify({ text: result.reply, lang: result.lang, voiceId }),
       signal,
     });
     if (!response.ok || !response.body) {
@@ -146,8 +200,12 @@ export function VoiceAgent() {
     setTranscript(text);
     setReply("");
     setError("");
+    setOpen(true);
 
-    void postJson("/api/fast-decision", { text }, controller.signal)
+    const fastBody = { text, siteMap };
+    const relayBody = { text, knowledgeBasePath };
+
+    void postJson("/api/fast-decision", fastBody, controller.signal)
       .then((payload) => {
         if (turnRef.current !== turn) return;
         const decision = readDecision(payload);
@@ -167,7 +225,7 @@ export function VoiceAgent() {
         setError(reason instanceof Error ? reason.message : "Request failed");
       });
 
-    void postJson("/api/chat-relay", { text }, controller.signal)
+    void postJson("/api/chat-relay", relayBody, controller.signal)
       .then((payload) => pumpReply(turn, generation, readRelay(payload), controller.signal))
       .catch((reason: unknown) => {
         if (turnRef.current !== turn || controller.signal.aborted) return;
@@ -262,6 +320,11 @@ export function VoiceAgent() {
     }
   }
 
+  function closePanel() {
+    if (recording) stopRecording();
+    setOpen(false);
+  }
+
   const status = recording
     ? "聆聽緊"
     : transcribing
@@ -274,19 +337,37 @@ export function VoiceAgent() {
             ? "播放回覆"
             : "按一下講";
 
-  return (
-    <section
-      className="fixed inset-x-0 bottom-0 border-t border-black/10 bg-white/95 px-4 py-4 backdrop-blur dark:border-white/10 dark:bg-neutral-950/95"
-      data-queue-state={queueState}
-      data-clip-count={clipCount}
-    >
-      <div className="mx-auto flex max-w-xl flex-col gap-3">
-        {hint ? (
-          <p className="text-sm font-medium" aria-live="polite">
-            {hint}
-          </p>
-        ) : null}
-        <div className="flex items-center gap-3">
+  const panel = (
+    <div className="pointer-events-none fixed bottom-5 right-5 z-[80] flex w-[min(100vw-2.5rem,22rem)] flex-col items-end gap-3">
+      {open ? (
+        <section
+          id="voice-widget-panel"
+          className="pointer-events-auto w-full rounded-2xl border border-[#E2E8F0] bg-white p-4 text-[#0A2540] shadow-stripe-lg"
+          data-queue-state={queueState}
+          data-clip-count={clipCount}
+        >
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-extrabold">語音專員</p>
+              <p className="text-xs text-[#425466]">
+                {status}
+                <span className="ml-2 opacity-60">{queueState}</span>
+                <span className="ml-2 opacity-60">clips {clipCount}</span>
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closePanel}
+              className="rounded-lg px-2 py-1 text-xs font-semibold text-[#425466] hover:bg-[#F6F9FC]"
+            >
+              關閉
+            </button>
+          </div>
+          {hint ? (
+            <p className="mb-3 text-sm font-medium" aria-live="polite">
+              {hint}
+            </p>
+          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -294,20 +375,38 @@ export function VoiceAgent() {
             }}
             aria-pressed={recording}
             aria-label="Microphone"
-            className="rounded-full bg-neutral-950 px-4 py-2 text-sm text-white dark:bg-white dark:text-neutral-950"
+            className="rounded-full bg-[#635BFF] px-4 py-2 text-sm font-bold text-white hover:bg-[#5249F5]"
           >
             {recording ? "停止" : "麥克風"}
           </button>
-          <p className="text-sm opacity-70">
-            {status}
-            <span className="ml-2 opacity-60">{queueState}</span>
-            <span className="ml-2 opacity-60">clips {clipCount}</span>
-          </p>
-        </div>
-        {transcript ? <p className="text-sm">你：{transcript}</p> : null}
-        {reply ? <p className="text-sm">回覆：{reply}</p> : null}
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
-      </div>
-    </section>
+          {transcript ? <p className="mt-3 text-sm">你：{transcript}</p> : null}
+          {reply ? <p className="mt-2 text-sm">回覆：{reply}</p> : null}
+          {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
+        </section>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-controls="voice-widget-panel"
+        className="pointer-events-auto inline-flex h-14 w-14 items-center justify-center rounded-full bg-[#635BFF] text-white shadow-stripe-md hover:bg-[#5249F5]"
+        aria-label="語音專員助手"
+      >
+        <MicIcon />
+      </button>
+    </div>
+  );
+
+  if (mountNode) return createPortal(panel, mountNode);
+  return panel;
+}
+
+function MicIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z" />
+      <path d="M19 11a7 7 0 0 1-14 0" />
+      <path d="M12 18v3" />
+    </svg>
   );
 }
