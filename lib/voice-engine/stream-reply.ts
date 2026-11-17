@@ -47,7 +47,7 @@ async function requestReply(
     temperature: 0.2,
     max_tokens: 120,
     stream: true,
-    provider: google && fast ? { sort: "latency", order: ["Google"] } : { sort: "latency" },
+    provider: { sort: "latency" },
     messages: [
       { role: "system", content: system },
       { role: "user", content: text },
@@ -83,9 +83,14 @@ export async function* streamReplyDeltas(
     try {
       const attempt = (fast: boolean) => requestReply(apiKey, model, system, text, combineSignals(signal, budget.signal), fast);
       response = await attempt(true);
-      if (response.status === 400 && model.startsWith("google/")) {
+      if ((response.status === 400 || response.status === 403) && model.startsWith("google/")) {
         await response.body?.cancel().catch(() => undefined);
         response = await attempt(false);
+      }
+      if (response.status === 429) {
+        lastStatus = response.status;
+        await response.body?.cancel().catch(() => undefined);
+        break;
       }
       if (!response.ok || !response.body) {
         lastStatus = response.status;
