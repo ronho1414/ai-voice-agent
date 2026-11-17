@@ -23,6 +23,8 @@ alwaysApply: false
 
 - Fast Path 播哪條 MP3，Slow Path 就收到同一段 `openerTranscript`。
 - 慢路徑只接後半句，唔好再講「你好」，亦唔好重複前半句。
+- 有文字之後即刻播本地 MP3。本地規則 80ms 內中咗就唔好等 Jev、OpenRouter 或 ElevenLabs。
+- 上傳文件同手打備註唔好當成每句都要讀出嚟。Jev 判斷問題相關，Slow Path 先用自己嘅口語答；無關就唔好提嗰段文字。公司資料同唔好估事實嘅規則保持不變。
 - 預錄音檔尾音結束時就要開始串流，對話氣泡係同一段，由開場白接到回覆。
 
 ## 音檔

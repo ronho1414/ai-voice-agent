@@ -49,6 +49,10 @@ export class AudioQueue {
   private streamAt = Number.POSITIVE_INFINITY;
   private streamTimer: ReturnType<typeof setTimeout> | null = null;
   private streamFailed = false;
+  private segmentSources: AudioBufferSourceNode[] = [];
+  private segmentTail = 0;
+  private liveSegments = 0;
+  private segmentsDone = false;
   private clock: SpeechClock = { ...SILENT_CLOCK };
   private readonly listeners = new Set<(state: AudioQueueState) => void>();
   private readonly gain: GainNode;
@@ -115,6 +119,9 @@ export class AudioQueue {
       clearTimeout(this.streamTimer);
       this.streamTimer = null;
     }
+    this.segmentTail = 0;
+    this.liveSegments = 0;
+    this.segmentsDone = false;
     this.clock = { generation: this.generation, phase: "none", startedAt: 0, duration: 0 };
     this.setState("IDLE");
     return this.generation;
@@ -175,6 +182,30 @@ export class AudioQueue {
       this.clock = { generation, phase: "gap", startedAt: this.context.currentTime, duration: 0 };
     }
     this.kickStream(generation);
+  }
+
+  async appendMp3(generation: number, bytes: Uint8Array): Promise<boolean> {
+    if (generation !== this.generation || bytes.byteLength === 0) return false;
+    const copy = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(copy).set(bytes);
+    let audio: AudioBuffer;
+    try {
+      audio = await this.context.decodeAudioData(copy);
+    } catch {
+      return false;
+    }
+    if (generation !== this.generation) return false;
+    this.scheduleSegment(generation, audio);
+    return true;
+  }
+
+  endSegments(generation: number): void {
+    if (generation !== this.generation) return;
+    this.segmentsDone = true;
+    if (this.liveSegments === 0 && (this.clipEnded || !this.clipSource)) {
+      this.clock = { generation, phase: "none", startedAt: 0, duration: 0 };
+      this.setState("IDLE");
+    }
   }
 
   pushStreamChunk(generation: number, chunk: Uint8Array): void {
@@ -243,6 +274,7 @@ export class AudioQueue {
       return;
     }
     if (!this.decodedStream) {
+      if (this.liveSegments > 0) return;
       if (this.clipEnded || this.chunks.length > 0 || this.streamDone) {
         this.setState(this.streamDone && this.byteLength() === 0 ? "IDLE" : "BUFFERING_STREAM");
         if (this.streamDone && this.byteLength() === 0) {
@@ -289,18 +321,58 @@ export class AudioQueue {
     }, delay);
   }
 
+  private scheduleSegment(generation: number, buffer: AudioBuffer): void {
+    const source = this.context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(this.gain);
+    const audible = audibleDuration(buffer);
+    const now = this.context.currentTime;
+    const earliest = now + 0.02;
+    const afterClip = this.clipEnded || !this.clipSource ? earliest : Math.max(earliest, this.streamAt);
+    const when = Math.max(afterClip, this.segmentTail || 0, earliest);
+    this.segmentTail = when + audible;
+    this.liveSegments += 1;
+    source.onended = () => {
+      if (generation !== this.generation) return;
+      this.liveSegments = Math.max(0, this.liveSegments - 1);
+      if (this.liveSegments === 0 && this.segmentsDone) {
+        this.clock = { generation, phase: "none", startedAt: 0, duration: 0 };
+        this.setState("IDLE");
+      }
+    };
+    this.segmentSources.push(source);
+    try {
+      source.start(when);
+    } catch {
+      this.liveSegments = Math.max(0, this.liveSegments - 1);
+      return;
+    }
+    const delay = Math.max(0, (when - now) * 1000);
+    this.streamTimer = setTimeout(() => {
+      if (generation !== this.generation) return;
+      this.clock = { generation, phase: "stream", startedAt: this.context.currentTime, duration: audible };
+      this.setState("PLAYING_STREAM");
+    }, delay);
+  }
+
   private resetStream(): void {
     this.chunks = [];
     this.streamDone = false;
     this.decodedStream = null;
     this.streamFailed = false;
+    this.segmentSources = [];
+    this.segmentTail = 0;
+    this.liveSegments = 0;
+    this.segmentsDone = false;
   }
 
   private stopNodes(): void {
     this.stopNode(this.clipSource);
     this.stopNode(this.streamSource);
+    for (const source of this.segmentSources) this.stopNode(source);
     this.clipSource = null;
     this.streamSource = null;
+    this.segmentSources = [];
   }
 
   private stopNode(node: AudioBufferSourceNode | null): void {

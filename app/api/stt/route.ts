@@ -3,6 +3,7 @@ import { transcribeAudio } from "@/lib/voice-engine/stt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "hkg1";
 
 export async function POST(request: Request): Promise<Response> {
   try {

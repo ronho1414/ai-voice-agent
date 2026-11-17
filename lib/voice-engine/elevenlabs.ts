@@ -4,6 +4,39 @@ import type { VoiceSetting } from "@/lib/voice-engine/clips-config";
 // The spec names eleven_turbo_v4. ElevenLabs serves that turbo model as eleven_v4_turbo.
 const TTS_MODELS = ["eleven_turbo_v4", "eleven_v4_turbo", "eleven_flash_v2_5"] as const;
 
+export async function openFlashStream(options: {
+  voice: VoiceSetting;
+  text: string;
+  signal?: AbortSignal;
+}): Promise<Response> {
+  const apiKey = requireEnv("ELEVENLABS_API_KEY");
+  const response = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(options.voice.voiceId)}/stream?optimize_streaming_latency=4`,
+    {
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      body: JSON.stringify({
+        text: options.text,
+        model_id: "eleven_flash_v2_5",
+        voice_settings: {
+          stability: options.voice.stability,
+          similarity_boost: options.voice.similarity_boost,
+        },
+      }),
+      signal: options.signal ?? AbortSignal.timeout(30_000),
+    },
+  );
+  if (!response.ok || !response.body) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`ElevenLabs TTS failed (${response.status})`);
+  }
+  return response;
+}
+
 export async function openSpeechStream(options: {
   voice: VoiceSetting;
   text: string;

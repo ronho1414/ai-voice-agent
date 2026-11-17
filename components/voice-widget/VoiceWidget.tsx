@@ -5,10 +5,11 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { createPortal } from "react-dom";
 import { SpeakingOrb } from "@/components/voice-widget/SpeakingOrb";
 import { AudioQueue, preloadClips, type AudioQueueState } from "@/lib/voice-engine/audio-queue";
+import { matchLocalFast } from "@/lib/voice-engine/local-fast";
 import { createMicrophoneListener, type MicrophoneListener } from "@/lib/voice-engine/microphone";
 import { joinSpeech, revealSpeech } from "@/lib/voice-engine/speech-text";
 import type { SiteMap } from "@/lib/voice-engine/site-map";
-import { isIntent, isLang, isSitePage, type ChatRelayResult, type FastDecision, type SitePageId } from "@/lib/voice-engine/types";
+import { isIntent, isLang, isSitePage, type FastDecision, type SitePageId } from "@/lib/voice-engine/types";
 
 const MOUNT_ID = "CURSOR_VOICE_WIDGET_MOUNT_POINT";
 
@@ -24,6 +25,13 @@ type ChatLine = {
   id: number;
   role: "user" | "assistant";
   text: string;
+};
+
+type VoiceTimings = {
+  sttMs: number;
+  fastPathMs: number | null;
+  llmFirstTokenMs: number | null;
+  slowPathAudioMs: number | null;
 };
 
 type ActiveSpeech = {
@@ -106,13 +114,65 @@ function readDecision(value: unknown): FastDecision {
   };
 }
 
-function readRelay(value: unknown): ChatRelayResult {
-  if (!isRecord(value)) throw new Error("Request failed");
-  const { reply, clipText, lang } = value;
-  if (typeof reply !== "string" || typeof clipText !== "string" || typeof lang !== "string" || !isLang(lang)) {
-    throw new Error("Request failed");
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+type StreamDone = {
+  reply: string;
+  clipText: string;
+  lang: string;
+};
+
+async function readVoiceStream(
+  response: Response,
+  hooks: {
+    onToken: (ms: number) => void;
+    onAudio: (bytes: Uint8Array) => Promise<void>;
+  },
+): Promise<StreamDone> {
+  if (!response.ok || !response.body) throw new Error("Request failed");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let donePayload: StreamDone | null = null;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (value) buffer += decoder.decode(value, { stream: !done });
+    let newline = buffer.indexOf("\n");
+    while (newline >= 0) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      newline = buffer.indexOf("\n");
+      if (!line) continue;
+      let event: Record<string, unknown>;
+      try {
+        const parsed: unknown = JSON.parse(line);
+        if (!isRecord(parsed)) continue;
+        event = parsed;
+      } catch {
+        continue;
+      }
+      if (event.type === "token" && typeof event.llmFirstTokenMs === "number") hooks.onToken(event.llmFirstTokenMs);
+      if (event.type === "audio" && typeof event.b64 === "string") await hooks.onAudio(decodeBase64(event.b64));
+      if (event.type === "error") {
+        throw new Error(typeof event.error === "string" ? event.error : "Request failed");
+      }
+      if (event.type === "done" && typeof event.reply === "string") {
+        donePayload = {
+          reply: event.reply,
+          clipText: typeof event.clipText === "string" ? event.clipText : "",
+          lang: typeof event.lang === "string" ? event.lang : "yue",
+        };
+      }
+    }
+    if (done) break;
   }
-  return { reply, clipText, lang };
+  if (!donePayload) throw new Error("Request failed");
+  return donePayload;
 }
 
 function useMountNode(id: string, pathname: string): HTMLElement | null {
@@ -170,6 +230,7 @@ export function VoiceWidget({
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [caption, setCaption] = useState("");
+  const [timings, setTimings] = useState<VoiceTimings | null>(null);
   const [messages, setMessages] = useState<ChatLine[]>([]);
   const [draft, setDraft] = useState("");
   const threadRef = useRef<HTMLDivElement>(null);
@@ -374,32 +435,6 @@ export function VoiceWidget({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function pumpReply(turn: number, generation: number, result: ChatRelayResult, signal: AbortSignal) {
-    const queue = queueRef.current;
-    if (!queue || turnRef.current !== turn) return;
-    const response = await fetch("/api/tts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: result.reply, lang: result.lang, voiceId }),
-      signal,
-    });
-    if (!response.ok || !response.body) {
-      queue.failStream(generation);
-      throw new Error("Request failed");
-    }
-    const reader = response.body.getReader();
-    while (turnRef.current === turn) {
-      const { done, value } = await reader.read();
-      if (value) queue.pushStreamChunk(generation, value);
-      if (done) {
-        queue.finishStream(generation);
-        return;
-      }
-    }
-    await reader.cancel();
-    queue.failStream(generation);
-  }
-
   function openSitePage(pageId: string, sectionId: string | null, pageName: string): void {
     setHint(`正在為您前往：${pageName}`);
     const options = sectionId ? { sectionId } : undefined;
@@ -413,7 +448,7 @@ export function VoiceWidget({
     window.location.assign(target);
   }
 
-  async function runTurn(text: string, turn: number): Promise<void> {
+  async function runTurn(text: string, turn: number, sttMs: number): Promise<void> {
     const queue = queueRef.current;
     if (!queue || turnRef.current !== turn) return;
     await queue.resume();
@@ -443,49 +478,74 @@ export function VoiceWidget({
 
     const turnCount = (spokenTurnsRef.current += 1);
     const currentPage = currentSitePage();
-    const fast = postJson(
-      "/api/fast-decision",
-      { text, siteMap, currentPage, turnCount },
-      controller.signal,
-    )
-      .then((payload) => {
-        if (turnRef.current !== turn || activeRef.current !== active) return null;
-        const decision = readDecision(payload);
-        active.opener = decision.clipText;
-        if (active.holdText || !speakerOnRef.current) {
-          active.holdText = true;
-          publishActive(active);
-        } else {
-          const buffer = buffersRef.current.get(decision.clipFile);
-          if (buffer) queue.playClip(generation, buffer);
-          else queue.skipClip(generation);
-        }
-        if (decision.navigateUrl !== "NONE" && decision.pageName) {
-          openSitePage(decision.navigateUrl, decision.sectionId, decision.pageName);
-        }
-        return decision;
-      })
-      .catch((reason: unknown) => {
-        if (turnRef.current !== turn || controller.signal.aborted) return null;
+    const textReady = performance.now();
+    const timings: VoiceTimings = {
+      sttMs,
+      fastPathMs: null,
+      llmFirstTokenMs: null,
+      slowPathAudioMs: null,
+    };
+    const publishTimings = () => {
+      const snapshot = { ...timings };
+      setTimings(snapshot);
+      console.info("[voice]", snapshot);
+    };
+    publishTimings();
+
+    const applyDecision = (decision: FastDecision) => {
+      if (turnRef.current !== turn || activeRef.current !== active) return;
+      active.opener = decision.clipText;
+      if (active.holdText || !speakerOnRef.current) {
+        active.holdText = true;
+        publishActive(active);
+      } else {
+        const buffer = buffersRef.current.get(decision.clipFile);
+        if (buffer) queue.playClip(generation, buffer);
+        else queue.skipClip(generation);
+      }
+      timings.fastPathMs = Math.round(performance.now() - textReady);
+      publishTimings();
+      if (decision.navigateUrl !== "NONE" && decision.pageName) {
+        openSitePage(decision.navigateUrl, decision.sectionId, decision.pageName);
+      }
+    };
+
+    let decision: FastDecision | null = matchLocalFast(text, siteMap, { currentPage, turnCount });
+    if (decision) {
+      applyDecision(decision);
+    } else {
+      try {
+        const payload = await postJson(
+          "/api/fast-decision",
+          { text, siteMap, currentPage, turnCount },
+          controller.signal,
+        );
+        if (turnRef.current !== turn || activeRef.current !== active) return;
+        decision = readDecision(payload);
+        applyDecision(decision);
+      } catch (reason: unknown) {
+        if (turnRef.current !== turn || controller.signal.aborted) return;
         if (!active.holdText) queue.skipClip(generation);
         setError(publicError(reason));
-        return null;
-      });
+        decision = null;
+      }
+    }
 
-    const relay = fast.then(async (decision) => {
-      if (turnRef.current !== turn || activeRef.current !== active) return;
-      const body = decision
-        ? {
-            text,
-            knowledgeBasePath,
-            currentPage,
-            turnCount,
-            openerTranscript: decision.clipText,
-            lang: decision.lang,
-            siteId: "voicepilot-hq",
+    if (turnRef.current !== turn || activeRef.current !== active) return;
+    const slowStarted = performance.now();
+    const body = decision
+      ? {
+          text,
+          knowledgeBasePath,
+          currentPage,
+          turnCount,
+          openerTranscript: decision.clipText,
+          lang: decision.lang,
+          siteId: "voicepilot-hq",
             sessionId: sessionRef.current,
             intent: decision.intent,
             openerClipId: decision.clipFile,
+            voiceId,
           }
         : {
             text,
@@ -494,27 +554,47 @@ export function VoiceWidget({
             turnCount,
             siteId: "voicepilot-hq",
             sessionId: sessionRef.current,
+            voiceId,
           };
-      try {
-        const payload = await postJson("/api/chat-relay", body, controller.signal);
-        if (turnRef.current !== turn || activeRef.current !== active) return;
-        const result = readRelay(payload);
-        active.reply = result.reply;
-        if (!active.opener) active.opener = result.clipText;
-        if (active.holdText || !speakerOnRef.current) {
-          active.holdText = true;
-          publishActive(active);
-          return;
-        }
-        await pumpReply(turn, generation, result, controller.signal);
-      } catch (reason: unknown) {
-        if (turnRef.current !== turn || controller.signal.aborted) return;
-        queue.failStream(generation);
-        setError(publicError(reason));
+    try {
+      const response = await fetch("/api/chat-relay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (turnRef.current !== turn || activeRef.current !== active) return;
+      let heardAudio = false;
+      const result = await readVoiceStream(response, {
+        onToken: (ms) => {
+          timings.llmFirstTokenMs = ms;
+          publishTimings();
+        },
+        onAudio: async (bytes) => {
+          if (turnRef.current !== turn || active.holdText || !speakerOnRef.current) return;
+          const played = await queue.appendMp3(generation, bytes);
+          if (played && !heardAudio) {
+            heardAudio = true;
+            timings.slowPathAudioMs = Math.round(performance.now() - slowStarted);
+            publishTimings();
+          }
+        },
+      });
+      if (turnRef.current !== turn || activeRef.current !== active) return;
+      active.reply = result.reply;
+      if (!active.opener) active.opener = result.clipText;
+      if (active.holdText || !speakerOnRef.current) {
+        active.holdText = true;
+        publishActive(active);
+      } else {
+        queue.endSegments(generation);
       }
-    });
-
-    await Promise.allSettled([fast, relay]);
+    } catch (reason: unknown) {
+      if (turnRef.current !== turn || controller.signal.aborted) return;
+      queue.failStream(generation);
+      queue.endSegments(generation);
+      setError(publicError(reason));
+    }
     if (turnRef.current !== turn || activeRef.current !== active) return;
     if (queue.getState() === "IDLE") {
       publishActive(active);
@@ -545,8 +625,10 @@ export function VoiceWidget({
     inflightRef.current = true;
     setTranscribing(true);
     setError("");
+    const sttStarted = performance.now();
     void transcribe(audio, controller.signal)
       .then(async (text) => {
+        const sttMs = Math.round(performance.now() - sttStarted);
         if (turnRef.current !== turn) return;
         if (!text) {
           inflightRef.current = false;
@@ -554,7 +636,7 @@ export function VoiceWidget({
           return;
         }
         setTranscribing(false);
-        await runTurn(text, turn);
+        await runTurn(text, turn, sttMs);
       })
       .catch((reason: unknown) => {
         if (turnRef.current !== turn || controller.signal.aborted) return;
@@ -598,7 +680,7 @@ export function VoiceWidget({
     if (playing || inflightRef.current) bargeInFromUser();
     const turn = turnRef.current;
     inflightRef.current = true;
-    void runTurn(text, turn);
+    void runTurn(text, turn, 0);
   }
 
   function onMicPress(): void {
@@ -692,6 +774,12 @@ export function VoiceWidget({
             </div>
           </div>
           <footer className="border-t border-[#E2E8F0] bg-white">
+            {timings ? (
+              <p className="px-4 pt-2 text-[11px] leading-4 text-[#425466]" data-voice-timings="true">
+                sttMs {timings.sttMs} · fastPathMs {timings.fastPathMs ?? "—"} · llmFirstTokenMs{" "}
+                {timings.llmFirstTokenMs ?? "—"} · slowPathAudioMs {timings.slowPathAudioMs ?? "—"}
+              </p>
+            ) : null}
             <form onSubmit={sendDraft} className="flex items-center gap-2 px-3 pt-3">
               <input
                 value={draft}
