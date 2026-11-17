@@ -32,4 +32,4 @@ The script writes `public/clips/{intent}_{lang}.mp3`. It tries ElevenLabs `eleve
 
 ## Talk
 
-Open the voice panel from **立即語音體驗** (`#open-voice-demo-btn`) or the bottom-right assistant. Speech is transcribed with Deepgram (`nova-3`, then `nova-2`). `/api/fast-decision` and `/api/chat-relay` run together. The opener plays from the preloaded buffer. If navigation confidence is at least 0.75, the page changes and shows the destination. The reply is spoken with ElevenLabs when the opener ends. Clicking the microphone again stops the audio.
+Open the voice panel from **立即語音體驗** (`#open-voice-demo-btn`) or the bottom-right assistant. Speech is transcribed with Deepgram (`nova-3`, then `nova-2`). `/api/fast-decision` and `/api/chat-relay` run together. The opener plays from the preloaded buffer. When a page should open, the widget calls `window.navigateToPage` with `home`, `advantages`, `pricing`, or `about`. A demo booking also passes `{ sectionId: "demo-booking-form" }`. The reply is spoken with ElevenLabs when the opener ends. Clicking the microphone again stops the audio. Guests can also type in the panel.

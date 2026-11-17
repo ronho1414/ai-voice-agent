@@ -1,9 +1,10 @@
 export const INTENTS = [
   "greeting",
-  "checking_info",
-  "navigating",
-  "pricing",
-  "empathy",
+  "company_intro",
+  "navigate_pricing",
+  "navigate_advantages",
+  "deep_lookup",
+  "booking_demo",
 ] as const;
 
 export type Intent = (typeof INTENTS)[number];
@@ -18,6 +19,7 @@ export type FastDecision = {
   clipText: string;
   clipFile: string;
   navigateUrl: string;
+  sectionId: string | null;
   pageName: string | null;
   confidence: number;
 };

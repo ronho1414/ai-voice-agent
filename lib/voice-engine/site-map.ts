@@ -1,6 +1,7 @@
 export type SitePage = {
   url: string;
   name: string;
+  sectionId?: string;
   keywords: Record<string, string[]>;
 };
 
@@ -35,9 +36,11 @@ export function parseSiteMap(value: unknown): SiteMap {
     if (!isRecord(item) || typeof item.url !== "string" || typeof item.name !== "string") {
       throw new Error("config/site-map.json is invalid");
     }
+    const sectionId = typeof item.sectionId === "string" ? item.sectionId.trim() : "";
     return {
       url: item.url,
       name: item.name,
+      sectionId: sectionId || undefined,
       keywords: readKeywords(item.keywords),
     };
   });
@@ -48,10 +51,15 @@ export function selectRoute(
   choice: string,
   confidence: number,
   siteMap: SiteMap,
-): { navigateUrl: string; pageName: string | null; confidence: number } {
+): { navigateUrl: string; sectionId: string | null; pageName: string | null; confidence: number } {
   const page = siteMap.pages.find((item) => item.url === choice);
   if (!page || choice === "NONE" || confidence < siteMap.threshold) {
-    return { navigateUrl: "NONE", pageName: null, confidence };
+    return { navigateUrl: "NONE", sectionId: null, pageName: null, confidence };
   }
-  return { navigateUrl: page.url, pageName: page.name, confidence };
+  return {
+    navigateUrl: page.url,
+    sectionId: page.sectionId ?? null,
+    pageName: page.name,
+    confidence,
+  };
 }

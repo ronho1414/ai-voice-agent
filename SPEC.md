@@ -21,14 +21,14 @@
 ### 軌道 A：Fast Path（0.3 秒內搶閘反應 + 網頁導航）
 1. **預載音效庫 (`/public/clips/`)**：
    * 網頁載入（Page Load）時，透過 Web Audio API 預先將所有預錄 MP3 解碼並存入記憶體（`AudioBuffer`），播放時不可產生網絡請求。
-   * 音檔命名規範：`{intent}_{lang}.mp3`（例如 `checking_info_yue.mp3`, `navigating_en.mp3`）。
+   * 音檔命名規範：`{intent}_{lang}.mp3`（例如 `company_intro_yue.mp3`, `navigate_pricing_en.mp3`）。
 2. **Jev 決策引擎 (`/api/fast-decision`)**：
    * 同時向 Jev 發送兩個分類請求：
-     * **任務 1（開場白選擇）**：從預設分類 `[greeting, checking_info, navigating, pricing, empathy]` 及語言 `[yue, zh, en]` 中選出最匹配的一項。
-     * **任務 2（網頁導航路由）**：對照 `config/site-map.json`，判斷用戶是否需要跳轉頁面。若最高信心分數 `>= 0.75`，返回目標 URL（如 `/pricing`）；否則返回 `NONE`。
+     * **任務 1（開場白選擇）**：從預設分類 `[greeting, company_intro, navigate_pricing, navigate_advantages, deep_lookup, booking_demo]` 及語言 `[yue, zh, en]` 中選出最匹配的一項。
+     * **任務 2（網頁導航路由）**：對照 `config/site-map.json` 的頁面 id（`home`、`advantages`、`pricing`、`about`）。問價錢、知識庫或預約 Demo 時，由對應 intent 強制跳頁。其餘情況若最高信心分數 `>= 0.75`，返回頁面 id；否則返回 `NONE`。
 3. **即時執行**：
    * 前端收到回應後，**立即**從記憶體播放對應的預錄 MP3（約 1.5 - 2 秒）。
-   * 若 `navigateUrl !== "NONE"`，在播放聲音的同時執行前端路由跳轉，並在畫面顯示「正在為您前往：{頁面名稱}」提示。
+   * 若 `navigateUrl !== "NONE"`，呼叫 `window.navigateToPage(navigateUrl)`。預約 Demo 再傳 `{ sectionId: "demo-booking-form" }`。唔好用 Next.js 路由打開 `/pricing` 這類空頁。畫面顯示「正在為您前往：{頁面名稱}」。
 
 ### 軌道 B：Slow Path（知識庫檢索 + 無縫語音接力）
 1. **企業知識庫注入**：

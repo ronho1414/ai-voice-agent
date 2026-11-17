@@ -2,8 +2,8 @@
   "threshold": 0.75,
   "pages": [
     {
-      "url": "/",
-      "name": "主頁",
+      "url": "home",
+      "name": "首頁",
       "keywords": {
         "yue": ["主頁", "首頁", "返去主頁", "開頭"],
         "zh": ["主页", "首页", "回到首页"],
@@ -11,30 +11,30 @@
       }
     },
     {
-      "url": "/services",
-      "name": "療程服務",
+      "url": "advantages",
+      "name": "核心優勢",
       "keywords": {
-        "yue": ["療程", "服務", "療程服務", "有咩療程"],
-        "zh": ["疗程", "服务", "疗程服务", "有什么项目"],
-        "en": ["services", "treatments", "treatment menu"]
+        "yue": ["知識庫", "PDF", "防幻覺", "點樣運作", "技術", "上傳", "核心優勢"],
+        "zh": ["知识库", "PDF", "防幻觉", "怎么运作", "技术", "核心优势"],
+        "en": ["knowledge base", "PDF", "hallucination", "how it works", "advantages"]
       }
     },
     {
-      "url": "/pricing",
-      "name": "價目表",
+      "url": "pricing",
+      "name": "收費方案",
       "keywords": {
-        "yue": ["價目", "價目表", "價錢", "幾錢"],
-        "zh": ["价目", "价目表", "价格", "多少钱"],
-        "en": ["pricing", "price", "price list", "how much"]
+        "yue": ["價錢", "收費", "套餐", "幾錢", "價目", "Starter", "Growth", "Enterprise"],
+        "zh": ["价格", "收费", "套餐", "多少钱", "价目"],
+        "en": ["pricing", "price", "plans", "how much", "package"]
       }
     },
     {
-      "url": "/booking",
-      "name": "網上預約",
+      "url": "about",
+      "name": "關於我們",
       "keywords": {
-        "yue": ["預約", "網上預約", "約時間", "訂位"],
-        "zh": ["预约", "网上预约", "订时间"],
-        "en": ["booking", "book", "appointment", "reserve"]
+        "yue": ["關於", "團隊", "預約", "Demo", "聯絡", "留低資料", "尖沙咀"],
+        "zh": ["关于", "团队", "预约", "演示", "联系"],
+        "en": ["about", "team", "demo", "contact", "book"]
       }
     }
   ]

@@ -21,91 +21,109 @@
       "intent": "greeting",
       "lang": "yue",
       "file": "greeting_yue.mp3",
-      "clipText": "你好，有咩可以幫到你呀？"
+      "clipText": "你好呀！歡迎嚟到 VoicePilot AI 領聲智導，想了解我哋嘅語音導航定收費方案呀？"
     },
     {
       "intent": "greeting",
       "lang": "zh",
       "file": "greeting_zh.mp3",
-      "clipText": "你好，有什麼可以幫你的？"
+      "clipText": "你好！欢迎来到 VoicePilot AI 领声智导，想了解我们的语音导航还是收费方案？"
     },
     {
       "intent": "greeting",
       "lang": "en",
       "file": "greeting_en.mp3",
-      "clipText": "Hi, how can I help you?"
+      "clipText": "Hi! Welcome to VoicePilot AI. Would you like to hear about voice navigation or our plans?"
     },
     {
-      "intent": "checking_info",
+      "intent": "company_intro",
       "lang": "yue",
-      "file": "checking_info_yue.mp3",
-      "clipText": "等我幫你睇睇。"
+      "file": "company_intro_yue.mp3",
+      "clipText": "我哋 VoicePilot AI 專幫企業網站升級 0.35 秒極速反應嘅三語 AI 語音專員，"
     },
     {
-      "intent": "checking_info",
+      "intent": "company_intro",
       "lang": "zh",
-      "file": "checking_info_zh.mp3",
-      "clipText": "我幫你查一下。"
+      "file": "company_intro_zh.mp3",
+      "clipText": "我们 VoicePilot AI 专门帮企业网站升级 0.35 秒极速反应的三语 AI 语音专员，"
     },
     {
-      "intent": "checking_info",
+      "intent": "company_intro",
       "lang": "en",
-      "file": "checking_info_en.mp3",
-      "clipText": "Let me check that for you."
+      "file": "company_intro_en.mp3",
+      "clipText": "VoicePilot AI upgrades a company website with a trilingual voice specialist that answers in 0.35 seconds,"
     },
     {
-      "intent": "navigating",
+      "intent": "navigate_pricing",
       "lang": "yue",
-      "file": "navigating_yue.mp3",
-      "clipText": "好，我而家帶你去嗰版。"
+      "file": "navigate_pricing_yue.mp3",
+      "clipText": "好呀，我即刻帶你去收費方案頁睇下三個套餐嘅詳細對比，"
     },
     {
-      "intent": "navigating",
+      "intent": "navigate_pricing",
       "lang": "zh",
-      "file": "navigating_zh.mp3",
-      "clipText": "好，我帶你去那個頁面。"
+      "file": "navigate_pricing_zh.mp3",
+      "clipText": "好，我马上带你去收费方案页，看三个套餐的详细对比，"
     },
     {
-      "intent": "navigating",
+      "intent": "navigate_pricing",
       "lang": "en",
-      "file": "navigating_en.mp3",
-      "clipText": "Okay, I'll take you to that page."
+      "file": "navigate_pricing_en.mp3",
+      "clipText": "Sure, I'll take you to the pricing page to compare the three plans,"
     },
     {
-      "intent": "pricing",
+      "intent": "navigate_advantages",
       "lang": "yue",
-      "file": "pricing_yue.mp3",
-      "clipText": "等我同你睇下價錢先。"
+      "file": "navigate_advantages_yue.mp3",
+      "clipText": "我哋支援直接上傳公司內部 PDF 價目表同手冊，我帶你睇下點樣運作，"
     },
     {
-      "intent": "pricing",
+      "intent": "navigate_advantages",
       "lang": "zh",
-      "file": "pricing_zh.mp3",
-      "clipText": "我幫你看一下價格。"
+      "file": "navigate_advantages_zh.mp3",
+      "clipText": "我们支持直接上传公司内部 PDF 价目表和手册，我带你看看怎么运作，"
     },
     {
-      "intent": "pricing",
+      "intent": "navigate_advantages",
       "lang": "en",
-      "file": "pricing_en.mp3",
-      "clipText": "Let me look up the price."
+      "file": "navigate_advantages_en.mp3",
+      "clipText": "You can upload your own PDF price lists and manuals. I'll show you how that works,"
     },
     {
-      "intent": "empathy",
+      "intent": "deep_lookup",
       "lang": "yue",
-      "file": "empathy_yue.mp3",
-      "clipText": "唔緊要，我明白你嘅情況。"
+      "file": "deep_lookup_yue.mp3",
+      "clipText": "收到，我幫你核對下企業知識庫嘅詳細資料先，"
     },
     {
-      "intent": "empathy",
+      "intent": "deep_lookup",
       "lang": "zh",
-      "file": "empathy_zh.mp3",
-      "clipText": "沒關係，我明白你的情況。"
+      "file": "deep_lookup_zh.mp3",
+      "clipText": "收到，我先帮你核对一下企业知识库的详细资料，"
     },
     {
-      "intent": "empathy",
+      "intent": "deep_lookup",
       "lang": "en",
-      "file": "empathy_en.mp3",
-      "clipText": "I understand, and I'll help with that."
+      "file": "deep_lookup_en.mp3",
+      "clipText": "Got it. I'll check the company knowledge base for the details,"
+    },
+    {
+      "intent": "booking_demo",
+      "lang": "yue",
+      "file": "booking_demo_yue.mp3",
+      "clipText": "無問題！我即刻帶你去預約表單，留低公司網址我哋團隊就會幫你整專屬 Demo。"
+    },
+    {
+      "intent": "booking_demo",
+      "lang": "zh",
+      "file": "booking_demo_zh.mp3",
+      "clipText": "没问题！我马上带你去预约表单，留下公司网址，我们团队会帮你做专属 Demo。"
+    },
+    {
+      "intent": "booking_demo",
+      "lang": "en",
+      "file": "booking_demo_en.mp3",
+      "clipText": "No problem. I'll take you to the booking form. Leave your website and our team will build a demo."
     }
   ]
 }

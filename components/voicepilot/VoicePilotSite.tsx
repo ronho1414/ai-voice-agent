@@ -13,6 +13,14 @@ declare global {
   }
 }
 
+function openRequestedPage(): void {
+  const params = new URLSearchParams(window.location.search);
+  const page = params.get("page");
+  const section = params.get("section");
+  if (!page || typeof window.navigateToPage !== "function") return;
+  window.navigateToPage(page, section ? { sectionId: section } : undefined);
+}
+
 export function VoicePilotSite() {
   useEffect(() => {
     if (!window.__voicePilotBooted) {
@@ -24,6 +32,7 @@ export function VoicePilotSite() {
     } else {
       window.initVoicePilotSite?.();
     }
+    openRequestedPage();
 
     let cancelled = false;
     const paintIcons = () => {
@@ -40,6 +49,7 @@ export function VoicePilotSite() {
       lucide.onload = () => {
         paintIcons();
         window.initVoicePilotSite?.();
+        openRequestedPage();
       };
       document.body.appendChild(lucide);
     } else {

@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { SpeakingOrb } from "@/components/voice-widget/SpeakingOrb";
@@ -70,7 +70,7 @@ async function postJson(url: string, body: unknown, signal: AbortSignal): Promis
 
 function readDecision(value: unknown): FastDecision {
   if (!isRecord(value)) throw new Error("Request failed");
-  const { intent, lang, clipText, clipFile, navigateUrl, pageName, confidence } = value;
+  const { intent, lang, clipText, clipFile, navigateUrl, sectionId, pageName, confidence } = value;
   if (
     typeof intent !== "string" ||
     !isIntent(intent) ||
@@ -79,12 +79,22 @@ function readDecision(value: unknown): FastDecision {
     typeof clipText !== "string" ||
     typeof clipFile !== "string" ||
     typeof navigateUrl !== "string" ||
+    (typeof sectionId !== "string" && sectionId !== null && sectionId !== undefined) ||
     (typeof pageName !== "string" && pageName !== null) ||
     typeof confidence !== "number"
   ) {
     throw new Error("Request failed");
   }
-  return { intent, lang, clipText, clipFile, navigateUrl, pageName, confidence };
+  return {
+    intent,
+    lang,
+    clipText,
+    clipFile,
+    navigateUrl,
+    sectionId: typeof sectionId === "string" ? sectionId : null,
+    pageName,
+    confidence,
+  };
 }
 
 function readRelay(value: unknown): ChatRelayResult {
@@ -122,7 +132,6 @@ export function VoiceWidget({
   clips,
   clipsBasePath = "/clips",
 }: VoiceWidgetProps) {
-  const router = useRouter();
   const pathname = usePathname();
   const mountNode = useMountNode(MOUNT_ID, pathname);
   const queueRef = useRef<AudioQueue | null>(null);
@@ -380,6 +389,19 @@ export function VoiceWidget({
     queue.failStream(generation);
   }
 
+  function openSitePage(pageId: string, sectionId: string | null, pageName: string): void {
+    setHint(`正在為您前往：${pageName}`);
+    const options = sectionId ? { sectionId } : undefined;
+    if (window.location.pathname === "/" && typeof window.navigateToPage === "function") {
+      window.navigateToPage(pageId, options);
+      return;
+    }
+    const target = sectionId
+      ? `/?page=${encodeURIComponent(pageId)}&section=${encodeURIComponent(sectionId)}`
+      : `/#${encodeURIComponent(pageId)}`;
+    window.location.assign(target);
+  }
+
   async function runTurn(text: string, turn: number): Promise<void> {
     const queue = queueRef.current;
     if (!queue || turnRef.current !== turn) return;
@@ -422,8 +444,7 @@ export function VoiceWidget({
           else queue.skipClip(generation);
         }
         if (decision.navigateUrl !== "NONE" && decision.pageName) {
-          setHint(`正在為您前往：${decision.pageName}`);
-          if (decision.navigateUrl !== pathname) router.push(decision.navigateUrl);
+          openSitePage(decision.navigateUrl, decision.sectionId, decision.pageName);
         }
       })
       .catch((reason: unknown) => {

@@ -23,11 +23,18 @@ type OpenerCache = {
 };
 
 const INTENT_CRITERIA: Record<Intent, string> = {
-  greeting: "Hello, thanks, or an opener with no question and no request to open a page.",
-  checking_info: "Asks for a fact such as hours, address, phone, services, or another general question.",
-  navigating: "Mainly wants to open or go to a page.",
-  pricing: "Asks what something costs, about fees, or about the price list.",
-  empathy: "Upset, worried, apologizing, or needs reassurance.",
+  greeting: "Hello, hi, or 你好 with no real question about the company, price, product, or booking.",
+  company_intro: "Asks what the company does, what is special, or for a basic introduction. Not a price, PDF, or booking request.",
+  navigate_pricing: "Asks the price, the plans, or to compare Starter, Growth, and Enterprise.",
+  navigate_advantages: "Asks about the PDF knowledge base, hallucination control, or how the technology works.",
+  deep_lookup: "Asks a specific clause, an industry case detail, or an unusual detailed question that is not a greeting, intro, price, product overview, or booking.",
+  booking_demo: "Wants to book a demo, leave contact details, or have the team follow up.",
+};
+
+const FORCED_PAGE: Partial<Record<Intent, { url: string; sectionId?: string }>> = {
+  navigate_pricing: { url: "pricing" },
+  navigate_advantages: { url: "advantages" },
+  booking_demo: { url: "about", sectionId: "demo-booking-form" },
 };
 
 const LANG_CRITERIA: Record<Lang, string> = {
@@ -105,13 +112,13 @@ async function runOpener(text: string): Promise<OpenerDecision> {
   const answers = await jevChoices(
     {
       utterance: text,
-      setting: "Clinic website voice receptionist. Choose the opener and the guest's language.",
+      setting: "VoicePilot AI website. The speaker is a senior voice-solution specialist, not a clinic receptionist.",
     },
     {
       intent: {
         type: "choice",
         instructions:
-          "Which short opener should play first? Use pricing when they ask what something costs. Use navigating when they mainly want to change pages. Use empathy when they are upset. Use greeting for hello. Use checking_info for other factual questions.",
+          "Which opener should play first? Use greeting only for hello. Use company_intro for what the company does. Use navigate_pricing for price or plans. Use navigate_advantages for PDF, hallucination control, or how it works. Use booking_demo when they want a demo or to leave contact details. Use deep_lookup only for a specific clause, case detail, or unusual question. Do not use deep_lookup for a greeting, a company introduction, a price, or a booking.",
         criteria: INTENT_CRITERIA,
       },
       lang: {
@@ -177,6 +184,7 @@ async function decideRoute(
   siteMap: SiteMap,
 ): Promise<{
   navigateUrl: string;
+  sectionId: string | null;
   pageName: string | null;
   confidence: number;
 }> {
@@ -194,7 +202,7 @@ async function decideRoute(
       page: {
         type: "choice",
         instructions:
-          "Which page should open now? Choose a page URL only when the guest wants that page. Choose NONE when they are greeting, asking a question, or not asking to change pages.",
+          "Which page id should open now? Choose home, advantages, pricing, or about only when the guest wants that page. Choose NONE when they are greeting or the answer can stay on the current page.",
         criteria,
       },
     },
@@ -203,15 +211,29 @@ async function decideRoute(
   return selectRoute(answer.choice, answer.confidence, siteMap);
 }
 
+function navigationFor(intent: Intent, siteMap: SiteMap) {
+  const forced = FORCED_PAGE[intent];
+  if (!forced) return null;
+  const page = siteMap.pages.find((item) => item.url === forced.url);
+  return {
+    navigateUrl: forced.url,
+    sectionId: forced.sectionId ?? page?.sectionId ?? null,
+    pageName: page?.name ?? forced.url,
+    confidence: 1,
+  };
+}
+
 export async function decideFast(text: string, siteMap: SiteMap = loadSiteMap()): Promise<FastDecision> {
   const [opener, route] = await Promise.all([decideOpener(text), decideRoute(text, siteMap)]);
+  const navigation = navigationFor(opener.intent, siteMap) ?? route;
   return {
     intent: opener.intent,
     lang: opener.lang,
     clipText: opener.clipText,
     clipFile: opener.clipFile,
-    navigateUrl: route.navigateUrl,
-    pageName: route.pageName,
-    confidence: route.confidence,
+    navigateUrl: navigation.navigateUrl,
+    sectionId: navigation.sectionId,
+    pageName: navigation.pageName,
+    confidence: navigation.confidence,
   };
 }
