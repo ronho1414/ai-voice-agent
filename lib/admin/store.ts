@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { readAgentId, readClientName, readClientSlug, readRouteMap, safeRouteMap, type RouteMap } from "@/lib/admin/clients";
 import { contentTypeFor, documentKind, storageExtension } from "@/lib/admin/extract";
 
 export type StoreMode = "supabase" | "local";
@@ -47,13 +48,29 @@ export type LogSummary = {
   topPage: string | null;
 };
 
+export type ClientRecord = {
+  id: string;
+  client_slug: string;
+  client_name: string;
+  elevenlabs_agent_id: string;
+  route_map: RouteMap;
+  is_active: boolean;
+  created_at: string;
+};
+
+export type PublicClientConfig = {
+  elevenlabsAgentId: string;
+  routeMap: RouteMap;
+};
+
 type LocalStore = {
   documents: DocumentRecord[];
   notes: NoteRecord[];
   logs: ConversationRecord[];
+  clients: ClientRecord[];
 };
 
-const EMPTY: LocalStore = { documents: [], notes: [], logs: [] };
+const EMPTY: LocalStore = { documents: [], notes: [], logs: [], clients: [] };
 const STORAGE_EXTS = [".pdf", ".txt", ".md", ".markdown", ".docx", ".csv"];
 const TEXT_LIMIT = 200_000;
 const KNOWLEDGE_LIMIT = 16_000;
@@ -95,9 +112,10 @@ async function hydrate(): Promise<void> {
       documents: Array.isArray(parsed.documents) ? parsed.documents : [],
       notes: Array.isArray(parsed.notes) ? parsed.notes : [],
       logs: Array.isArray(parsed.logs) ? parsed.logs : [],
+      clients: Array.isArray(parsed.clients) ? parsed.clients.flatMap(storedClient) : [],
     };
   } catch {
-    memory = { documents: [], notes: [], logs: [] };
+    memory = { documents: [], notes: [], logs: [], clients: [] };
   }
 }
 
@@ -108,6 +126,7 @@ async function readLocal(): Promise<LocalStore> {
       documents: memory.documents.slice(),
       notes: memory.notes.slice(),
       logs: memory.logs.slice(),
+      clients: memory.clients.slice(),
     };
   });
 }
@@ -527,6 +546,184 @@ function summarizeLogs(rows: ConversationRecord[]): LogSummary {
     highIntent: rows.filter((item) => item.is_high_intent).length,
     topPage: topPage(rows.map((item) => item.current_page)),
   };
+}
+
+function storedClient(value: unknown): ClientRecord[] {
+  if (!value || typeof value !== "object") return [];
+  const row = value as Partial<ClientRecord>;
+  try {
+    return [
+      {
+        id: typeof row.id === "string" && row.id ? row.id : crypto.randomUUID(),
+        client_slug: readClientSlug(row.client_slug),
+        client_name: readClientName(row.client_name),
+        elevenlabs_agent_id: readAgentId(row.elevenlabs_agent_id),
+        route_map: readRouteMap(row.route_map),
+        is_active: row.is_active !== false,
+        created_at: typeof row.created_at === "string" ? row.created_at : new Date().toISOString(),
+      },
+    ];
+  } catch {
+    return [];
+  }
+}
+
+function publicConfig(client: ClientRecord): PublicClientConfig | null {
+  if (!client.is_active) return null;
+  return {
+    elevenlabsAgentId: client.elevenlabs_agent_id,
+    routeMap: safeRouteMap(client.route_map),
+  };
+}
+
+export async function listClients(): Promise<{ mode: StoreMode; clients: ClientRecord[] }> {
+  const supabase = supabaseAdmin();
+  if (!supabase) {
+    const store = await readLocal();
+    return { mode: "local", clients: store.clients };
+  }
+  const { data, error } = await supabase
+    .from("embed_clients")
+    .select("id,client_slug,client_name,elevenlabs_agent_id,route_map,is_active,created_at")
+    .order("created_at", { ascending: false });
+  if (error) {
+    const store = await readLocal();
+    return { mode: "local", clients: store.clients };
+  }
+  return { mode: "supabase", clients: (data ?? []).flatMap(storedClient) };
+}
+
+export async function saveClient(input: {
+  client_slug: string;
+  client_name: string;
+  elevenlabs_agent_id: string;
+  route_map: RouteMap;
+}): Promise<{ mode: StoreMode; client: ClientRecord }> {
+  const slug = readClientSlug(input.client_slug);
+  const name = readClientName(input.client_name);
+  const agentId = readAgentId(input.elevenlabs_agent_id);
+  const routeMap = readRouteMap(input.route_map);
+  const supabase = supabaseAdmin();
+  if (!supabase) {
+    let saved: ClientRecord | null = null;
+    await changeLocal((store) => {
+      const current = store.clients.find((item) => item.client_slug === slug);
+      saved = current
+        ? { ...current, client_name: name, elevenlabs_agent_id: agentId, route_map: routeMap }
+        : {
+            id: crypto.randomUUID(),
+            client_slug: slug,
+            client_name: name,
+            elevenlabs_agent_id: agentId,
+            route_map: routeMap,
+            is_active: true,
+            created_at: new Date().toISOString(),
+          };
+      const rest = store.clients.filter((item) => item.client_slug !== slug);
+      return { ...store, clients: [saved!, ...rest] };
+    });
+    return { mode: "local", client: saved! };
+  }
+
+  const existing = await supabase
+    .from("embed_clients")
+    .select("id,client_slug,client_name,elevenlabs_agent_id,route_map,is_active,created_at")
+    .eq("client_slug", slug)
+    .maybeSingle();
+  if (existing.error) {
+    let saved: ClientRecord | null = null;
+    await changeLocal((store) => {
+      const current = store.clients.find((item) => item.client_slug === slug);
+      saved = current
+        ? { ...current, client_name: name, elevenlabs_agent_id: agentId, route_map: routeMap }
+        : {
+            id: crypto.randomUUID(),
+            client_slug: slug,
+            client_name: name,
+            elevenlabs_agent_id: agentId,
+            route_map: routeMap,
+            is_active: true,
+            created_at: new Date().toISOString(),
+          };
+      return { ...store, clients: [saved!, ...store.clients.filter((item) => item.client_slug !== slug)] };
+    });
+    return { mode: "local", client: saved! };
+  }
+  const prior = existing.data ? storedClient(existing.data)[0] : undefined;
+  const client: ClientRecord = {
+    id: prior?.id ?? crypto.randomUUID(),
+    client_slug: slug,
+    client_name: name,
+    elevenlabs_agent_id: agentId,
+    route_map: routeMap,
+    is_active: prior?.is_active ?? true,
+    created_at: prior?.created_at ?? new Date().toISOString(),
+  };
+  const { error } = prior
+    ? await supabase
+        .from("embed_clients")
+        .update({
+          client_name: client.client_name,
+          elevenlabs_agent_id: client.elevenlabs_agent_id,
+          route_map: client.route_map,
+        })
+        .eq("client_slug", slug)
+    : await supabase.from("embed_clients").insert(client);
+  if (error) throw new Error("Client save failed");
+  return { mode: "supabase", client };
+}
+
+export async function setClientActive(slugInput: string, isActive: boolean): Promise<StoreMode> {
+  const slug = readClientSlug(slugInput);
+  const supabase = supabaseAdmin();
+  if (!supabase) {
+    let found = false;
+    await changeLocal((store) => {
+      found = store.clients.some((item) => item.client_slug === slug);
+      if (!found) return store;
+      return {
+        ...store,
+        clients: store.clients.map((item) => (item.client_slug === slug ? { ...item, is_active: isActive } : item)),
+      };
+    });
+    if (!found) throw new Error("Client was not found");
+    return "local";
+  }
+  const { data, error } = await supabase
+    .from("embed_clients")
+    .update({ is_active: isActive })
+    .eq("client_slug", slug)
+    .select("id");
+  if (error) throw new Error("Client update failed");
+  if (!data || data.length === 0) throw new Error("Client was not found");
+  return "supabase";
+}
+
+export async function publicClientConfig(slugInput: string): Promise<PublicClientConfig | null> {
+  let slug = "";
+  try {
+    slug = readClientSlug(slugInput);
+  } catch {
+    return null;
+  }
+  const supabase = supabaseAdmin();
+  if (!supabase) {
+    const store = await readLocal();
+    const client = store.clients.find((item) => item.client_slug === slug);
+    return client ? publicConfig(client) : null;
+  }
+  const { data, error } = await supabase
+    .from("embed_clients")
+    .select("id,client_slug,client_name,elevenlabs_agent_id,route_map,is_active,created_at")
+    .eq("client_slug", slug)
+    .maybeSingle();
+  if (error || !data) {
+    const store = await readLocal();
+    const client = store.clients.find((item) => item.client_slug === slug);
+    return client ? publicConfig(client) : null;
+  }
+  const client = storedClient(data)[0];
+  return client ? publicConfig(client) : null;
 }
 
 function topPage(pages: string[]): string | null {

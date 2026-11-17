@@ -35,6 +35,29 @@ type Summary = {
   topPage: string | null;
 };
 
+type ClientItem = {
+  id: string;
+  client_slug: string;
+  client_name: string;
+  elevenlabs_agent_id: string;
+  route_map: Record<string, string>;
+  is_active: boolean;
+  created_at: string;
+};
+
+type RouteRow = { page: string; url: string };
+
+const EMBED_ORIGIN = "https://ai-voice-agent-five-tau.vercel.app";
+
+function embedSnippet(slug: string): string {
+  return `<script src="${EMBED_ORIGIN}/embed.js?client=${slug}" defer></script>`;
+}
+
+function rowsFromMap(map: Record<string, string>): RouteRow[] {
+  const rows = Object.entries(map).map(([page, url]) => ({ page, url }));
+  return rows.length > 0 ? rows : [{ page: "", url: "" }];
+}
+
 const PAGE_LABEL: Record<string, string> = {
   home: "首頁",
   advantages: "核心優勢",
@@ -74,7 +97,7 @@ export function AdminConsole() {
   const [authenticated, setAuthenticated] = useState(false);
   const [configured, setConfigured] = useState(true);
   const [password, setPassword] = useState("");
-  const [tab, setTab] = useState<"knowledge" | "logs">("knowledge");
+  const [tab, setTab] = useState<"knowledge" | "logs" | "embed">("knowledge");
   const [mode, setMode] = useState<"supabase" | "local" | "">("");
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [notes, setNotes] = useState<NoteItem[]>([]);
@@ -87,6 +110,13 @@ export function AdminConsole() {
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [clients, setClients] = useState<ClientItem[]>([]);
+  const [clientName, setClientName] = useState("");
+  const [clientSlug, setClientSlug] = useState("");
+  const [agentId, setAgentId] = useState("");
+  const [routeRows, setRouteRows] = useState<RouteRow[]>([{ page: "", url: "" }]);
+  const [savedSlug, setSavedSlug] = useState("");
+  const [copiedSlug, setCopiedSlug] = useState("");
 
   const loadDocuments = useCallback(async () => {
     const [documentsResponse, notesResponse] = await Promise.all([
@@ -107,6 +137,18 @@ export function AdminConsole() {
     setMode(documentsBody.mode === "local" || notesBody.mode === "local" ? "local" : documentsBody.mode);
     setDocuments(documentsBody.documents);
     setNotes(notesBody.notes);
+  }, []);
+
+  const loadClients = useCallback(async () => {
+    const response = await fetch("/api/admin/clients", { cache: "no-store" });
+    if (response.status === 401) {
+      setAuthenticated(false);
+      return;
+    }
+    if (!response.ok) throw new Error(await readError(response));
+    const body = (await response.json()) as { mode: "supabase" | "local"; clients: ClientItem[] };
+    setMode(body.mode);
+    setClients(body.clients);
   }, []);
 
   const loadLogs = useCallback(async (highIntent: boolean) => {
@@ -136,9 +178,10 @@ export function AdminConsole() {
   useEffect(() => {
     if (!authenticated) return;
     setError("");
-    const job = tab === "knowledge" ? loadDocuments() : loadLogs(highIntentOnly);
+    const job =
+      tab === "knowledge" ? loadDocuments() : tab === "logs" ? loadLogs(highIntentOnly) : loadClients();
     void job.catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Request failed"));
-  }, [authenticated, tab, highIntentOnly, loadDocuments, loadLogs]);
+  }, [authenticated, tab, highIntentOnly, loadDocuments, loadLogs, loadClients]);
 
   async function login(event: FormEvent) {
     event.preventDefault();
@@ -267,6 +310,74 @@ export function AdminConsole() {
     setDocuments((current) => current.filter((row) => row.id !== item.id));
   }
 
+  async function saveClient(event: FormEvent) {
+    event.preventDefault();
+    const routeMap: Record<string, string> = {};
+    for (const row of routeRows) {
+      const page = row.page.trim();
+      const url = row.url.trim();
+      if (!page && !url) continue;
+      routeMap[page] = url;
+    }
+    setBusy("client");
+    setError("");
+    try {
+      const response = await fetch("/api/admin/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientName,
+          clientSlug,
+          elevenlabsAgentId: agentId,
+          routeMap,
+        }),
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const body = (await response.json()) as { client: ClientItem };
+      setSavedSlug(body.client.client_slug);
+      setClientSlug(body.client.client_slug);
+      await loadClients();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Request failed");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function toggleClient(item: ClientItem) {
+    setError("");
+    const response = await fetch("/api/admin/clients", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientSlug: item.client_slug, isActive: !item.is_active }),
+    });
+    if (!response.ok) {
+      setError(await readError(response));
+      return;
+    }
+    setClients((current) =>
+      current.map((row) => (row.id === item.id ? { ...row, is_active: !row.is_active } : row)),
+    );
+  }
+
+  async function copySnippet(slug: string) {
+    try {
+      await navigator.clipboard.writeText(embedSnippet(slug));
+      setCopiedSlug(slug);
+    } catch {
+      setError("複製失敗，請手動選取程式碼。");
+    }
+  }
+
+  function editClient(item: ClientItem) {
+    setClientName(item.client_name);
+    setClientSlug(item.client_slug);
+    setAgentId(item.elevenlabs_agent_id);
+    setRouteRows(rowsFromMap(item.route_map));
+    setSavedSlug(item.client_slug);
+    setError("");
+  }
+
   async function ask(event: FormEvent) {
     event.preventDefault();
     const text = question.trim();
@@ -352,12 +463,164 @@ export function AdminConsole() {
               <TabButton active={tab === "logs"} onClick={() => setTab("logs")}>
                 訪客對話紀錄與分析
               </TabButton>
+              <TabButton active={tab === "embed"} onClick={() => setTab("embed")}>
+                客戶語音掛件
+              </TabButton>
               <span className="ml-auto text-xs font-medium text-[#425466]">
                 {mode === "supabase" ? "Supabase" : mode === "local" ? "本地後備" : ""}
               </span>
             </div>
 
-            {tab === "knowledge" ? (
+            {tab === "embed" ? (
+              <section className="flex flex-col gap-4">
+                <form onSubmit={saveClient} className="rounded-2xl border border-[#E6EBF1] bg-white p-5 shadow-stripe-sm">
+                  <h2 className="text-lg font-semibold">客戶語音掛件</h2>
+                  <p className="mt-2 text-sm text-[#425466]">
+                    填客戶名稱、代稱、ElevenLabs agent id，同每個頁面嘅網址。儲存之後可以複製嵌入碼。
+                  </p>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <label className="block text-sm font-medium">
+                      客戶名稱
+                      <input
+                        value={clientName}
+                        onChange={(event) => setClientName(event.target.value)}
+                        className="mt-2 w-full rounded-xl border border-[#E6EBF1] bg-[#F6F9FC] px-3 py-3 text-sm outline-none focus:border-[#635BFF]"
+                      />
+                    </label>
+                    <label className="block text-sm font-medium">
+                      代稱
+                      <input
+                        value={clientSlug}
+                        onChange={(event) => setClientSlug(event.target.value)}
+                        placeholder="voicepilot-hq"
+                        className="mt-2 w-full rounded-xl border border-[#E6EBF1] bg-[#F6F9FC] px-3 py-3 text-sm outline-none focus:border-[#635BFF]"
+                      />
+                    </label>
+                    <label className="block text-sm font-medium">
+                      Agent ID
+                      <input
+                        value={agentId}
+                        onChange={(event) => setAgentId(event.target.value)}
+                        placeholder="agent_..."
+                        className="mt-2 w-full rounded-xl border border-[#E6EBF1] bg-[#F6F9FC] px-3 py-3 text-sm outline-none focus:border-[#635BFF]"
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-4 flex flex-col gap-2">
+                    <p className="text-sm font-medium">頁面網址</p>
+                    {routeRows.map((row, index) => (
+                      <div key={index} className="grid gap-2 sm:grid-cols-[minmax(0,0.4fr)_minmax(0,1fr)_auto]">
+                        <input
+                          value={row.page}
+                          onChange={(event) =>
+                            setRouteRows((current) =>
+                              current.map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, page: event.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder="pricing"
+                          aria-label={`頁面 ${index + 1}`}
+                          className="rounded-xl border border-[#E6EBF1] bg-[#F6F9FC] px-3 py-3 text-sm outline-none focus:border-[#635BFF]"
+                        />
+                        <input
+                          value={row.url}
+                          onChange={(event) =>
+                            setRouteRows((current) =>
+                              current.map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, url: event.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder="/pricing"
+                          aria-label={`網址 ${index + 1}`}
+                          className="rounded-xl border border-[#E6EBF1] bg-[#F6F9FC] px-3 py-3 text-sm outline-none focus:border-[#635BFF]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setRouteRows((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                          className="rounded-full border border-[#E6EBF1] px-3 py-1.5 text-xs font-semibold"
+                        >
+                          移除
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setRouteRows((current) => [...current, { page: "", url: "" }])}
+                      className="self-start rounded-full border border-[#E6EBF1] px-3 py-1.5 text-xs font-semibold"
+                    >
+                      加一頁
+                    </button>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={busy === "client"}
+                    className="mt-4 rounded-full bg-[#635BFF] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {busy === "client" ? "儲存緊…" : "儲存掛件"}
+                  </button>
+                  {savedSlug ? (
+                    <div className="mt-4 rounded-xl bg-[#F6F9FC] p-4">
+                      <p className="text-sm font-semibold">嵌入碼</p>
+                      <pre className="mt-2 overflow-auto text-xs leading-6">{embedSnippet(savedSlug)}</pre>
+                      <button
+                        type="button"
+                        onClick={() => void copySnippet(savedSlug)}
+                        className="mt-2 rounded-full bg-[#0A2540] px-3 py-1.5 text-xs font-semibold text-white"
+                      >
+                        {copiedSlug === savedSlug ? "已複製" : "複製"}
+                      </button>
+                    </div>
+                  ) : null}
+                </form>
+                <ul className="flex flex-col gap-3">
+                  {clients.length === 0 ? (
+                    <li className="rounded-2xl border border-[#E6EBF1] bg-white p-5 text-sm text-[#425466] shadow-stripe-sm">
+                      未有客戶掛件。
+                    </li>
+                  ) : null}
+                  {clients.map((item) => (
+                    <li key={item.id} className="rounded-2xl border border-[#E6EBF1] bg-white p-5 shadow-stripe-sm">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold">{item.client_name}</p>
+                          <p className="mt-1 text-xs text-[#425466]">
+                            {item.client_slug} · {item.elevenlabs_agent_id}
+                          </p>
+                          <pre className="mt-3 overflow-auto text-xs leading-6">{embedSnippet(item.client_slug)}</pre>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => editClient(item)}
+                            className="rounded-full border border-[#E6EBF1] px-3 py-1.5 text-xs font-semibold"
+                          >
+                            編輯
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void copySnippet(item.client_slug)}
+                            className="rounded-full border border-[#E6EBF1] px-3 py-1.5 text-xs font-semibold"
+                          >
+                            {copiedSlug === item.client_slug ? "已複製" : "複製"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void toggleClient(item)}
+                            className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                              item.is_active ? "bg-[#635BFF] text-white" : "bg-[#E6EBF1] text-[#425466]"
+                            }`}
+                          >
+                            {item.is_active ? "啟用中" : "已暫停"}
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : tab === "knowledge" ? (
               <section className="flex flex-col gap-4">
                 <form onSubmit={saveNote} className="rounded-2xl border border-[#E6EBF1] bg-white p-5 shadow-stripe-sm">
                   <h2 className="text-lg font-semibold">直接輸入知識</h2>

@@ -18,7 +18,7 @@ alwaysApply: false
 
 ## 安全
 
-- `documents`、`knowledge_notes` 同 `conversation_logs` 要開 Row Level Security，而且唔好俾 anon key 直接讀寫。
+- `documents`、`knowledge_notes`、`conversation_logs` 同 `embed_clients` 要開 Row Level Security，而且唔好俾 anon key 直接讀寫。公開 `/api/client-config` 只返回啟用中客戶嘅 agent id 同 route map。
 - 管理後台用 `ADMIN_PASSWORD` 喺伺服器核對。錯誤密碼只可以返回未授權，唔好講出正確密碼。
 
 ## 完成標準

@@ -5,6 +5,12 @@ import { createElement, useEffect, useRef } from "react";
 
 const EMBED_SCRIPT = "https://unpkg.com/@elevenlabs/convai-widget-embed";
 
+type ConvaiCallDetail = {
+  config?: {
+    clientTools?: Record<string, (params: { page: string; sectionId?: string }) => string>;
+  };
+};
+
 function openConvai(): boolean {
   const event = new CustomEvent("elevenlabs-agent:expand", { detail: { action: "expand" } });
   document.dispatchEvent(event);
@@ -12,10 +18,29 @@ function openConvai(): boolean {
   return Boolean(detail._convaiEventHandled);
 }
 
+function registerNavigateWebsite(event: Event): void {
+  const config = (event as CustomEvent<ConvaiCallDetail>).detail?.config;
+  if (!config) return;
+  const tools = config.clientTools ?? {};
+  tools.navigate_website = ({ page, sectionId }) => {
+    if (typeof window.navigateToPage === "function") {
+      window.navigateToPage(page, sectionId ? { sectionId } : undefined);
+    }
+    return `Navigated to ${page}`;
+  };
+  config.clientTools = tools;
+}
+
 export function VoiceWidgetRoot() {
   const pathname = usePathname();
   const hidden = pathname?.startsWith("/admin") ?? false;
   const waitingRef = useRef(false);
+
+  useEffect(() => {
+    if (hidden) return;
+    document.addEventListener("elevenlabs-convai:call", registerNavigateWebsite);
+    return () => document.removeEventListener("elevenlabs-convai:call", registerNavigateWebsite);
+  }, [hidden]);
 
   useEffect(() => {
     if (hidden) return;

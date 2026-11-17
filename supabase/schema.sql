@@ -62,13 +62,34 @@ create index if not exists conversation_logs_high_intent_idx
   on public.conversation_logs (site_id, created_at desc)
   where is_high_intent = true;
 
+create table if not exists public.embed_clients (
+  id uuid primary key default gen_random_uuid(),
+  client_slug text not null,
+  client_name text not null,
+  elevenlabs_agent_id text not null,
+  route_map jsonb not null default '{}'::jsonb,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  constraint embed_clients_slug_key unique (client_slug),
+  constraint embed_clients_slug_format check (client_slug ~ '^[a-z0-9][a-z0-9-]{0,62}$'),
+  constraint embed_clients_name_not_blank check (length(btrim(client_name)) > 0),
+  constraint embed_clients_agent_not_blank check (length(btrim(elevenlabs_agent_id)) > 0),
+  constraint embed_clients_route_map_object check (jsonb_typeof(route_map) = 'object')
+);
+
+create index if not exists embed_clients_active_slug_idx
+  on public.embed_clients (client_slug)
+  where is_active = true;
+
 alter table public.documents enable row level security;
 alter table public.knowledge_notes enable row level security;
 alter table public.conversation_logs enable row level security;
+alter table public.embed_clients enable row level security;
 
 revoke all on table public.documents from anon, authenticated;
 revoke all on table public.knowledge_notes from anon, authenticated;
 revoke all on table public.conversation_logs from anon, authenticated;
+revoke all on table public.embed_clients from anon, authenticated;
 
 insert into storage.buckets (id, name, public)
 values ('knowledge-documents', 'knowledge-documents', false)

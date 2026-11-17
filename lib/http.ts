@@ -14,6 +14,11 @@ const BAD_REQUEST = new Set([
   "Note was not found",
   "File is too large",
   "Document was not found",
+  "Client name is required",
+  "Client slug is invalid",
+  "Agent id is invalid",
+  "Route map is invalid",
+  "Client was not found",
 ]);
 
 export function fail(error: unknown): Response {
