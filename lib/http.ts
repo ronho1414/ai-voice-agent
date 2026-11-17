@@ -6,6 +6,12 @@ const BAD_REQUEST = new Set([
   "Language is required",
   "Voice is invalid",
   "Knowledge base path is invalid",
+  "Site is invalid",
+  "Password is required",
+  "File is required",
+  "Only PDF files are accepted",
+  "File is too large",
+  "Document was not found",
 ]);
 
 export function fail(error: unknown): Response {

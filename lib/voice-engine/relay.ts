@@ -1,5 +1,5 @@
+import { loadAnswerKnowledge } from "@/lib/admin/knowledge";
 import { requireEnv } from "@/lib/voice-engine/env";
-import { loadKnowledgeFile } from "@/lib/voice-engine/read-config";
 import { decideOpener } from "@/lib/voice-engine/decision";
 import { buildSystemPrompt, guardReply } from "@/lib/voice-engine/prompt";
 import type { ChatRelayResult, Lang, TurnContext } from "@/lib/voice-engine/types";
@@ -78,9 +78,10 @@ export async function relayChat(
   knowledgeBasePath = "knowledge-base/company-info.md",
   spoken?: { clipText: string; lang: Lang },
   context?: TurnContext,
+  siteId = "voicepilot-hq",
 ): Promise<ChatRelayResult> {
   const opener = spoken ?? (await decideOpener(text, context));
-  const knowledge = loadKnowledgeFile(knowledgeBasePath);
+  const knowledge = await loadAnswerKnowledge(siteId, knowledgeBasePath);
   const system = buildSystemPrompt(knowledge, opener.clipText, opener.lang);
   const raw = await completeReply(system, text);
   return {
@@ -88,4 +89,11 @@ export async function relayChat(
     clipText: opener.clipText,
     lang: opener.lang,
   };
+}
+
+export async function answerFromKnowledge(text: string, siteId: string): Promise<string> {
+  const knowledge = await loadAnswerKnowledge(siteId, "knowledge-base/company-info.md");
+  const system = buildSystemPrompt(knowledge, "", "yue");
+  const raw = await completeReply(system, text);
+  return guardReply(raw, "", "yue", knowledge);
 }

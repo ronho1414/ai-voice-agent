@@ -98,3 +98,13 @@ Phase 1–3 的語音核心必須與公司外殼解耦。換設定即可把同�
 * `site-map.json`（頁面與區段跳轉）
 * `voiceId`
 * 預錄開場白 MP3
+
+---
+
+## 8. 管理後台與多租戶知識庫
+
+* `/admin` 用伺服器端 `ADMIN_PASSWORD` 保護。
+* PDF 文字存在 `documents`，以 `site_id` 隔離，預設 `voicepilot-hq`。
+* Slow Path 優先讀取該站 `is_active = true` 嘅 PDF 文字。沒有檔案或資料庫未設定時，回退 `knowledge-base/company-info.md`。
+* 對話寫入 `conversation_logs` 發生喺回覆產生之後，唔好阻塞 Fast Path。
+* 結構見 `supabase/schema.sql`。

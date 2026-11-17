@@ -22,6 +22,7 @@ const MONEY =
   /(?:HK\$|US\$|USD|HKD|\$\s?\d|￥\s?\d|\d[\d,]*(?:\.\d+)?\s?(?:港紙|港元|蚊|塊錢))/;
 
 export function continuationLine(clipText: string, lang: Lang): string {
+  if (!clipText.trim()) return "";
   if (lang === "yue") {
     return `你已經向訪客講出咗以下前半句開場白：「${clipText}」。請你必須直接順住呢句話嘅語氣同文法接落去講後半句，絕對唔准重複打招呼（例如唔准再講「你好」），亦唔准重複前半句已經講過嘅意思，保持地道香港廣東話口語。`;
   }
@@ -44,7 +45,9 @@ export function buildSystemPrompt(knowledge: string, clipText: string, lang: Lan
     "If the knowledge base does not contain the fact, say you will note it and someone will follow up. Do not invent facts.",
     "Quote only prices written in the knowledge base. Do not invent another amount.",
     "Do not greet again and do not repeat the opener.",
-  ].join("\n\n");
+  ]
+    .filter((line) => line.trim().length > 0)
+    .join("\n\n");
 }
 
 export function sanitizeSpokenReply(text: string): string {
