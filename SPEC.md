@@ -16,7 +16,7 @@
 
 ## 3. 核心架構：雙軌並行接力（Dual-Path Relay Architecture）
 
-當用戶完成說話並取得 STT 文字後，前端必須**同時（Parallel）**觸發 Fast Path 與 Slow Path，嚴禁串行等待：
+當用戶完成說話並取得 STT 文字後，前端先問 Fast Path。Fast Path 一返回開場白，就立即把同一句 `openerTranscript` 交給 Slow Path，並且立刻播放預錄 MP3。Slow Path 唔好再自己揀另一句開場白。預錄播放同文字生成仍然重疊，唔好等音檔播完先至開始生成。
 
 ### 軌道 A：Fast Path（0.3 秒內搶閘反應 + 網頁導航）
 1. **預載音效庫 (`/public/clips/`)**：
@@ -24,7 +24,7 @@
    * 音檔命名規範：`{intent}_{lang}.mp3`（例如 `company_intro_yue.mp3`, `navigate_pricing_en.mp3`）。
 2. **Jev 決策引擎 (`/api/fast-decision`)**：
    * 同時向 Jev 發送兩個分類請求：
-     * **任務 1（開場白選擇）**：從預設分類 `[greeting, company_intro, navigate_pricing, navigate_advantages, deep_lookup, booking_demo]` 及語言 `[yue, zh, en]` 中選出最匹配的一項。
+     * **任務 1（開場白選擇）**：同時睇訪客問題、`currentPage`（`home`、`advantages`、`pricing`、`about`）同 `turnCount`。第一輪（`turnCount === 1`）由 `[greeting, company_intro, navigate_pricing, navigate_advantages, compare_bots, ask_timeline, ask_voice_clone, price_objection, booking_demo, deep_lookup]` 揀一句未完嘅半句開場白。喺 `pricing` 頁優先方案比較語氣；喺 `advantages` 頁優先知識庫檔案語氣。第二輪起只可以揀 `[follow_up_ack, follow_up_detail, follow_up_nav]`。語言仍然係 `[yue, zh, en]`。
      * **任務 2（網頁導航路由）**：對照 `config/site-map.json` 的頁面 id（`home`、`advantages`、`pricing`、`about`）。問價錢、知識庫或預約 Demo 時，由對應 intent 強制跳頁。其餘情況若最高信心分數 `>= 0.75`，返回頁面 id；否則返回 `NONE`。
 3. **即時執行**：
    * 前端收到回應後，**立即**從記憶體播放對應的預錄 MP3（約 1.5 - 2 秒）。
@@ -36,7 +36,7 @@
    * 若知識庫無相關資料，必須禮貌回覆會記錄並安排專人跟進，嚴禁編造資料（No Hallucination）。
 2. **接力提示詞（Continuation Prompt）**：
    * 系統必須將軌道 A 選出的「預錄開場白原文」傳入大模型 Prompt，指令如下：
-     > 「你剛剛已經對客人說出了開場白：『{clip_text}』。請直接順著這句話的語氣與上下文無縫接下去回答重點，絕對不可重複打招呼或重複說『等我幫你睇睇』。」
+     > 「你已經向訪客講出咗以下前半句開場白：「{openerTranscript}」。請你必須直接順住呢句話嘅語氣同文法接落去講後半句，絕對唔准重複打招呼（例如唔准再講『你好』），亦唔准重複前半句已經講過嘅意思，保持地道香港廣東話口語。」
 3. **語音輸出格式限制（TTS Friendly）**：
    * 廣東話回覆必須使用地道香港口語（如「係、唔係、嘅、咗、喺」），嚴禁使用書面語。
    * 回覆長度控制在 **2 至 3 句之內**（適合語音聆聽）。
@@ -48,7 +48,7 @@
 * 必須實作一個嚴格的 `AudioQueue` 狀態機：
   1. 狀態 `PLAYING_CLIP`：正在播放軌道 A 的預錄開場白。
   2. 狀態 `BUFFERING_STREAM`：軌道 B 的 TTS 音頻串流已到達，但開場白尚未播完，暫存於緩衝區。
-  3. 狀態 `PLAYING_STREAM`：監聽預錄開場白的 `onended` 事件，在結束後的 **0 毫秒**內無縫啟動播放軌道 B 的回覆音頻。
+  3. 狀態 `PLAYING_STREAM`：預錄音檔播到可聞尾音（略過尾段靜音）時，以 Web Audio 時間表喺同一個時間點啟動軌道 B。對話氣泡把 `openerTranscript` 同 Slow Path 文字合成同一段。
 * 支援「用戶打斷（Barge-in）」：當用戶在 AI 說話期間再次點擊 Mic 或開始說話，立即停止所有正在播放的音頻並清空隊列。
 
 ---

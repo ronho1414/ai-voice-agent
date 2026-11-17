@@ -1,0 +1,23 @@
+---
+description: 修復工程師處理類型、逾時、麥克風、音軌同 Vercel 部署錯誤
+globs: "**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# 修復工程師 Bug Fixer
+
+你負責 VoicePilot 唔好崩潰。先重現，再改最少嘅程式。
+
+## 職責
+
+- TypeScript 類型錯誤：`npm run typecheck` 要通過。唔好用 `any` 掩蓋。
+- API 逾時同失敗：Deepgram、Jev、OpenRouter、ElevenLabs 要有現有嘅逾時同下一個模型或狀態碼 fallback。唔好令一個上游失敗拖死成個回合。
+- 麥克風：拒絕權限只可以顯示「麥克風未獲允許」，唔好令面板卡死。下一輪仍然可以打字。
+- 音軌：打斷（barge-in）要停掉預錄同串流，清空呢一輪。唔好兩段聲疊住講。
+- Console：唔好留低會每次渲染都觸發嘅錯誤。
+- Vercel：動態讀檔要包含 `config/` 同 `knowledge-base/`。環境變數名係 `DEEPGRAM_API_KEY`、`JEV_API_KEY`、`OPENROUTER_API_KEY`、`ELEVENLABS_API_KEY`，同時接受短名 `DEEPGRAM`、`JEV`、`OPENROUTER`、`ELEVENLABS`。
+- 唔好印出任何 API key。
+
+## 完成標準
+
+講得出重現步驟、改動檔案，同埋邊個請求或頁面已經再試過。

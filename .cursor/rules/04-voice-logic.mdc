@@ -1,0 +1,30 @@
+---
+description: 語音調節師負責廣東話口語、意圖路由同快慢路徑接駁
+globs: lib/voice-engine/**/*.ts,config/clips-config.json,components/voice-widget/**/*.tsx,scripts/generate-clips.ts
+alwaysApply: false
+---
+
+# 語音調節師 Voice & Logic Director
+
+你負責把聲聽落去係同一個人，由頭講到尾。
+
+## 口語
+
+- 廣東話用地道香港口語，可以自然夾雜 Demo、PDF、WhatsApp、Starter、Growth、Enterprise。
+- 唔好書面語，唔好診所接待員口吻，唔好每句都講「我幫你睇睇先」。
+
+## 意圖
+
+- 第一輪（`turnCount === 1`）先至用長開場白。判斷要同時睇訪客講咩、`currentPage`（`home`、`advantages`、`pricing`、`about`）同第幾輪。
+- 喺 `pricing` 頁，方案比較語氣優先。喺 `advantages` 頁，PDF 知識庫語氣優先。
+- 第二輪起只用短過渡：`follow_up_ack`「明白呀，」、`follow_up_detail`「呢方面好簡單，」、`follow_up_nav`「好呀，我即刻帶你睇下，」。
+
+## 接駁
+
+- Fast Path 播哪條 MP3，Slow Path 就收到同一段 `openerTranscript`。
+- 慢路徑只接後半句，唔好再講「你好」，亦唔好重複前半句。
+- 預錄音檔尾音結束時就要開始串流，對話氣泡係同一段，由開場白接到回覆。
+
+## 音檔
+
+- 改 `config/clips-config.json` 嘅 `clipText` 之後要跑 `npm run generate:clips`。檔名維持 `{intent}_{lang}.mp3`。

@@ -15,6 +15,28 @@ export type SpeechClock = {
 
 const SILENT_CLOCK: SpeechClock = { generation: 0, phase: "none", startedAt: 0, duration: 0 };
 
+function audibleDuration(buffer: AudioBuffer): number {
+  const length = buffer.length;
+  const step = 16;
+  const threshold = 0.02;
+  let last = 0;
+  for (let index = length - 1; index >= 0; index -= step) {
+    let loud = false;
+    for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+      if (Math.abs(buffer.getChannelData(channel)[index]) >= threshold) {
+        loud = true;
+        break;
+      }
+    }
+    if (loud) {
+      last = index;
+      break;
+    }
+  }
+  const seconds = (last + 1) / buffer.sampleRate + 0.04;
+  return Math.min(buffer.duration, Math.max(0.12, seconds));
+}
+
 export class AudioQueue {
   private state: AudioQueueState = "IDLE";
   private generation = 0;
@@ -24,6 +46,8 @@ export class AudioQueue {
   private streamDone = false;
   private decodedStream: AudioBuffer | null = null;
   private clipEnded = false;
+  private streamAt = Number.POSITIVE_INFINITY;
+  private streamTimer: ReturnType<typeof setTimeout> | null = null;
   private streamFailed = false;
   private clock: SpeechClock = { ...SILENT_CLOCK };
   private readonly listeners = new Set<(state: AudioQueueState) => void>();
@@ -86,6 +110,11 @@ export class AudioQueue {
     this.stopNodes();
     this.resetStream();
     this.clipEnded = false;
+    this.streamAt = Number.POSITIVE_INFINITY;
+    if (this.streamTimer) {
+      clearTimeout(this.streamTimer);
+      this.streamTimer = null;
+    }
     this.clock = { generation: this.generation, phase: "none", startedAt: 0, duration: 0 };
     this.setState("IDLE");
     return this.generation;
@@ -104,6 +133,7 @@ export class AudioQueue {
     const source = this.context.createBufferSource();
     source.buffer = buffer;
     source.connect(this.gain);
+    const audible = audibleDuration(buffer);
     source.onended = () => {
       if (generation !== this.generation || this.clipSource !== source) return;
       this.clipSource = null;
@@ -115,7 +145,24 @@ export class AudioQueue {
     };
     this.clipSource = source;
     this.setState(this.chunks.length > 0 || this.streamDone ? "BUFFERING_STREAM" : "PLAYING_CLIP");
-    this.startNode(generation, source, "clip");
+    const arm = () => {
+      if (generation !== this.generation) return;
+      const start = this.context.currentTime + 0.02;
+      this.streamAt = start + audible;
+      this.clock = { generation, phase: "clip", startedAt: start, duration: audible };
+      try {
+        source.start(start);
+        source.stop(this.streamAt);
+      } catch {
+        // The buffer may already have been started.
+      }
+      this.kickStream(generation);
+    };
+    if (this.context.state === "suspended") {
+      void this.context.resume().then(arm);
+      return;
+    }
+    arm();
   }
 
   skipClip(generation: number): void {
@@ -123,6 +170,7 @@ export class AudioQueue {
     this.stopNode(this.clipSource);
     this.clipSource = null;
     this.clipEnded = true;
+    this.streamAt = this.context.currentTime;
     if (this.clock.phase !== "stream") {
       this.clock = { generation, phase: "gap", startedAt: this.context.currentTime, duration: 0 };
     }
@@ -179,7 +227,7 @@ export class AudioQueue {
       const audio = await this.context.decodeAudioData(copy);
       if (generation !== this.generation) return;
       this.decodedStream = audio;
-      if (this.clipEnded) this.kickStream(generation);
+      this.kickStream(generation);
     } catch {
       if (generation !== this.generation) return;
       this.failStream(generation);
@@ -187,16 +235,19 @@ export class AudioQueue {
   }
 
   private kickStream(generation: number): void {
-    if (generation !== this.generation || !this.clipEnded || this.streamSource) return;
+    if (generation !== this.generation || this.streamSource) return;
+    if (!this.clipEnded && !Number.isFinite(this.streamAt)) return;
     if (this.streamFailed) {
       this.clock = { generation, phase: "none", startedAt: 0, duration: 0 };
       this.setState("IDLE");
       return;
     }
     if (!this.decodedStream) {
-      this.setState(this.streamDone && this.byteLength() === 0 ? "IDLE" : "BUFFERING_STREAM");
-      if (this.streamDone && this.byteLength() === 0) {
-        this.clock = { generation, phase: "none", startedAt: 0, duration: 0 };
+      if (this.clipEnded || this.chunks.length > 0 || this.streamDone) {
+        this.setState(this.streamDone && this.byteLength() === 0 ? "IDLE" : "BUFFERING_STREAM");
+        if (this.streamDone && this.byteLength() === 0) {
+          this.clock = { generation, phase: "none", startedAt: 0, duration: 0 };
+        }
       }
       return;
     }
@@ -218,35 +269,24 @@ export class AudioQueue {
       this.setState("IDLE");
     };
     this.streamSource = source;
-    this.setState("PLAYING_STREAM");
-    this.startNode(generation, source, "stream");
-  }
-
-  private startNode(generation: number, source: AudioBufferSourceNode, phase: "clip" | "stream"): void {
-    const begin = () => {
-      if (generation !== this.generation) return;
+    const now = this.context.currentTime;
+    const when = Math.max(now + 0.01, Number.isFinite(this.streamAt) ? this.streamAt : now + 0.01);
+    try {
+      source.start(when);
+    } catch {
+      // The buffer may already have been started.
+    }
+    const delay = Math.max(0, (when - now) * 1000);
+    this.streamTimer = setTimeout(() => {
+      if (generation !== this.generation || this.streamSource !== source) return;
       this.clock = {
         generation,
-        phase,
+        phase: "stream",
         startedAt: this.context.currentTime,
-        duration: source.buffer?.duration ?? 0,
+        duration: buffer.duration,
       };
-      try {
-        source.start(0);
-      } catch {
-        // The buffer may already have been started.
-      }
-    };
-
-    if (generation !== this.generation) return;
-    if (this.context.state === "suspended") {
-      void this.context.resume().then(() => {
-        if (generation !== this.generation) return;
-        begin();
-      });
-      return;
-    }
-    begin();
+      this.setState("PLAYING_STREAM");
+    }, delay);
   }
 
   private resetStream(): void {

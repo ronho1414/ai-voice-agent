@@ -3,7 +3,8 @@ export function joinSpeech(opener: string, reply: string): string {
   const right = reply.trim();
   if (!left) return right;
   if (!right) return left;
-  return `${left} ${right}`;
+  const joiner = /[，,、：:]$/.test(left) ? "" : " ";
+  return `${left}${joiner}${right}`;
 }
 
 export function revealSpeech(text: string, ratio: number): string {

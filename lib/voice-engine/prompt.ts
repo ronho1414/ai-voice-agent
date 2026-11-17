@@ -21,8 +21,14 @@ const UNKNOWN_REPLY: Record<Lang, string> = {
 const MONEY =
   /(?:HK\$|US\$|USD|HKD|\$\s?\d|￥\s?\d|\d[\d,]*(?:\.\d+)?\s?(?:港紙|港元|蚊|塊錢))/;
 
-export function continuationLine(clipText: string): string {
-  return `你剛剛已經對客人說出了開場白：『${clipText}』。請直接順著這句話的語氣與上下文無縫接下去回答重點，絕對不可重複打招呼，亦不可說「等我幫你睇睇」或「我幫你睇睇先」。`;
+export function continuationLine(clipText: string, lang: Lang): string {
+  if (lang === "yue") {
+    return `你已經向訪客講出咗以下前半句開場白：「${clipText}」。請你必須直接順住呢句話嘅語氣同文法接落去講後半句，絕對唔准重複打招呼（例如唔准再講「你好」），亦唔准重複前半句已經講過嘅意思，保持地道香港廣東話口語。`;
+  }
+  if (lang === "zh") {
+    return `你已经向访客说出了这半句开场白：「${clipText}」。请直接顺着这句话的语气和文法讲后半句，不要再打招呼，也不要重复前半句已经说过的意思。`;
+  }
+  return `You already said this opening half to the visitor: "${clipText}". Continue that sentence in the same tone. Do not greet again and do not repeat the first half.`;
 }
 
 export function buildSystemPrompt(knowledge: string, clipText: string, lang: Lang): string {
@@ -31,7 +37,7 @@ export function buildSystemPrompt(knowledge: string, clipText: string, lang: Lan
     "You are not a clinic receptionist. Do not mention clinics, medical treatments, or beauty services.",
     "The knowledge base below is the only source of facts.",
     knowledge.trim(),
-    continuationLine(clipText),
+    continuationLine(clipText, lang),
     LANGUAGE_RULE[lang],
     "Reply in 2 or 3 spoken sentences.",
     "Do not output Markdown or symbols such as *, #, or bullet lists.",
@@ -67,13 +73,19 @@ function withoutOpener(reply: string, clipText: string): string {
   return reply.slice(clipText.length).replace(/^[，,。.\s]+/, "").trim();
 }
 
+function withoutRepeatedGreeting(reply: string, clipText: string): string {
+  const stripped = withoutOpener(reply, clipText);
+  if (!clipText) return stripped;
+  return stripped.replace(/^(你好呀[！!？?，,]?|你好[！!？?，,]?|hello[,!?]?\s*|hi[,!?]?\s*)/i, "").trim();
+}
+
 export function guardReply(
   raw: string,
   clipText: string,
   lang: Lang,
   knowledge: string,
 ): string {
-  const cleaned = limitSentences(withoutOpener(sanitizeSpokenReply(raw), clipText));
+  const cleaned = limitSentences(withoutRepeatedGreeting(sanitizeSpokenReply(raw), clipText));
   if (!cleaned) return UNKNOWN_REPLY[lang];
   if (!MONEY.test(knowledge) && MONEY.test(cleaned)) return PRICE_REPLY[lang];
   return cleaned;

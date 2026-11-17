@@ -21,109 +21,235 @@
       "intent": "greeting",
       "lang": "yue",
       "file": "greeting_yue.mp3",
-      "clipText": "你好呀！歡迎嚟到 VoicePilot AI 領聲智導，想了解我哋嘅語音導航定收費方案呀？"
+      "clipText": "你好呀！歡迎嚟到 VoicePilot AI 領聲智導，"
     },
     {
       "intent": "greeting",
       "lang": "zh",
       "file": "greeting_zh.mp3",
-      "clipText": "你好！欢迎来到 VoicePilot AI 领声智导，想了解我们的语音导航还是收费方案？"
+      "clipText": "你好！欢迎来到 VoicePilot AI 领声智导，"
     },
     {
       "intent": "greeting",
       "lang": "en",
       "file": "greeting_en.mp3",
-      "clipText": "Hi! Welcome to VoicePilot AI. Would you like to hear about voice navigation or our plans?"
+      "clipText": "Hi, welcome to VoicePilot AI,"
     },
     {
       "intent": "company_intro",
       "lang": "yue",
       "file": "company_intro_yue.mp3",
-      "clipText": "我哋 VoicePilot AI 專幫企業網站升級 0.35 秒極速反應嘅三語 AI 語音專員，"
+      "clipText": "我哋 VoicePilot AI 專幫企業網站升級極速三語語音專員，"
     },
     {
       "intent": "company_intro",
       "lang": "zh",
       "file": "company_intro_zh.mp3",
-      "clipText": "我们 VoicePilot AI 专门帮企业网站升级 0.35 秒极速反应的三语 AI 语音专员，"
+      "clipText": "我们 VoicePilot AI 专门帮企业网站升级极速三语语音专员，"
     },
     {
       "intent": "company_intro",
       "lang": "en",
       "file": "company_intro_en.mp3",
-      "clipText": "VoicePilot AI upgrades a company website with a trilingual voice specialist that answers in 0.35 seconds,"
+      "clipText": "VoicePilot AI upgrades a company website with a fast trilingual voice specialist,"
     },
     {
       "intent": "navigate_pricing",
       "lang": "yue",
       "file": "navigate_pricing_yue.mp3",
-      "clipText": "好呀，我即刻帶你去收費方案頁睇下三個套餐嘅詳細對比，"
+      "clipText": "好呀，我即刻帶你去收費方案頁睇下三個套餐，"
     },
     {
       "intent": "navigate_pricing",
       "lang": "zh",
       "file": "navigate_pricing_zh.mp3",
-      "clipText": "好，我马上带你去收费方案页，看三个套餐的详细对比，"
+      "clipText": "好，我马上带你去收费方案页看三个套餐，"
     },
     {
       "intent": "navigate_pricing",
       "lang": "en",
       "file": "navigate_pricing_en.mp3",
-      "clipText": "Sure, I'll take you to the pricing page to compare the three plans,"
+      "clipText": "Sure, I'll take you to the pricing page to see the three plans,"
     },
     {
       "intent": "navigate_advantages",
       "lang": "yue",
       "file": "navigate_advantages_yue.mp3",
-      "clipText": "我哋支援直接上傳公司內部 PDF 價目表同手冊，我帶你睇下點樣運作，"
+      "clipText": "我哋可以直接上傳公司內部 PDF 價目表同手冊，"
     },
     {
       "intent": "navigate_advantages",
       "lang": "zh",
       "file": "navigate_advantages_zh.mp3",
-      "clipText": "我们支持直接上传公司内部 PDF 价目表和手册，我带你看看怎么运作，"
+      "clipText": "我们可以直接上传公司内部 PDF 价目表和手册，"
     },
     {
       "intent": "navigate_advantages",
       "lang": "en",
       "file": "navigate_advantages_en.mp3",
-      "clipText": "You can upload your own PDF price lists and manuals. I'll show you how that works,"
+      "clipText": "You can upload your own PDF price lists and manuals,"
     },
     {
-      "intent": "deep_lookup",
+      "intent": "compare_bots",
       "lang": "yue",
-      "file": "deep_lookup_yue.mp3",
-      "clipText": "收到，我幫你核對下企業知識庫嘅詳細資料先，"
+      "file": "compare_bots_yue.mp3",
+      "clipText": "同傳統文字機械人唔同，我哋係真正識聽識講，"
     },
     {
-      "intent": "deep_lookup",
+      "intent": "compare_bots",
       "lang": "zh",
-      "file": "deep_lookup_zh.mp3",
-      "clipText": "收到，我先帮你核对一下企业知识库的详细资料，"
+      "file": "compare_bots_zh.mp3",
+      "clipText": "和传统文字机器人不同，我们是真正会听会说，"
     },
     {
-      "intent": "deep_lookup",
+      "intent": "compare_bots",
       "lang": "en",
-      "file": "deep_lookup_en.mp3",
-      "clipText": "Got it. I'll check the company knowledge base for the details,"
+      "file": "compare_bots_en.mp3",
+      "clipText": "Unlike a traditional text bot, this one actually listens and talks,"
+    },
+    {
+      "intent": "ask_timeline",
+      "lang": "yue",
+      "file": "ask_timeline_yue.mp3",
+      "clipText": "一般三到五個工作天就搞得掂，"
+    },
+    {
+      "intent": "ask_timeline",
+      "lang": "zh",
+      "file": "ask_timeline_zh.mp3",
+      "clipText": "一般三到五个工作日就可以上线，"
+    },
+    {
+      "intent": "ask_timeline",
+      "lang": "en",
+      "file": "ask_timeline_en.mp3",
+      "clipText": "Going live usually takes three to five working days,"
+    },
+    {
+      "intent": "ask_voice_clone",
+      "lang": "yue",
+      "file": "ask_voice_clone_yue.mp3",
+      "clipText": "Growth 同 Enterprise 可以克隆你哋把品牌真人聲，"
+    },
+    {
+      "intent": "ask_voice_clone",
+      "lang": "zh",
+      "file": "ask_voice_clone_zh.mp3",
+      "clipText": "Growth 和 Enterprise 可以克隆你们的品牌真人声，"
+    },
+    {
+      "intent": "ask_voice_clone",
+      "lang": "en",
+      "file": "ask_voice_clone_en.mp3",
+      "clipText": "Growth and Enterprise can clone your brand's real voice,"
+    },
+    {
+      "intent": "price_objection",
+      "lang": "yue",
+      "file": "price_objection_yue.mp3",
+      "clipText": "如果你覺得月費有啲高，按年預繳有八折，"
+    },
+    {
+      "intent": "price_objection",
+      "lang": "zh",
+      "file": "price_objection_zh.mp3",
+      "clipText": "如果你觉得月费有点高，按年预缴有八折，"
+    },
+    {
+      "intent": "price_objection",
+      "lang": "en",
+      "file": "price_objection_en.mp3",
+      "clipText": "If the monthly fee feels high, paying yearly is twenty percent off,"
     },
     {
       "intent": "booking_demo",
       "lang": "yue",
       "file": "booking_demo_yue.mp3",
-      "clipText": "無問題！我即刻帶你去預約表單，留低公司網址我哋團隊就會幫你整專屬 Demo。"
+      "clipText": "無問題！我即刻帶你去預約表單，"
     },
     {
       "intent": "booking_demo",
       "lang": "zh",
       "file": "booking_demo_zh.mp3",
-      "clipText": "没问题！我马上带你去预约表单，留下公司网址，我们团队会帮你做专属 Demo。"
+      "clipText": "没问题！我马上带你去预约表单，"
     },
     {
       "intent": "booking_demo",
       "lang": "en",
       "file": "booking_demo_en.mp3",
-      "clipText": "No problem. I'll take you to the booking form. Leave your website and our team will build a demo."
+      "clipText": "No problem, I'll take you to the booking form,"
+    },
+    {
+      "intent": "deep_lookup",
+      "lang": "yue",
+      "file": "deep_lookup_yue.mp3",
+      "clipText": "收到，我幫你核對下企業知識庫，"
+    },
+    {
+      "intent": "deep_lookup",
+      "lang": "zh",
+      "file": "deep_lookup_zh.mp3",
+      "clipText": "收到，我先帮你核对一下企业知识库，"
+    },
+    {
+      "intent": "deep_lookup",
+      "lang": "en",
+      "file": "deep_lookup_en.mp3",
+      "clipText": "Got it, I'll check that in the company knowledge base,"
+    },
+    {
+      "intent": "follow_up_ack",
+      "lang": "yue",
+      "file": "follow_up_ack_yue.mp3",
+      "clipText": "明白呀，"
+    },
+    {
+      "intent": "follow_up_ack",
+      "lang": "zh",
+      "file": "follow_up_ack_zh.mp3",
+      "clipText": "明白，"
+    },
+    {
+      "intent": "follow_up_ack",
+      "lang": "en",
+      "file": "follow_up_ack_en.mp3",
+      "clipText": "Got it,"
+    },
+    {
+      "intent": "follow_up_detail",
+      "lang": "yue",
+      "file": "follow_up_detail_yue.mp3",
+      "clipText": "呢方面好簡單，"
+    },
+    {
+      "intent": "follow_up_detail",
+      "lang": "zh",
+      "file": "follow_up_detail_zh.mp3",
+      "clipText": "这方面很简单，"
+    },
+    {
+      "intent": "follow_up_detail",
+      "lang": "en",
+      "file": "follow_up_detail_en.mp3",
+      "clipText": "This part is simple,"
+    },
+    {
+      "intent": "follow_up_nav",
+      "lang": "yue",
+      "file": "follow_up_nav_yue.mp3",
+      "clipText": "好呀，我即刻帶你睇下，"
+    },
+    {
+      "intent": "follow_up_nav",
+      "lang": "zh",
+      "file": "follow_up_nav_zh.mp3",
+      "clipText": "好，我马上带你看，"
+    },
+    {
+      "intent": "follow_up_nav",
+      "lang": "en",
+      "file": "follow_up_nav_en.mp3",
+      "clipText": "Sure, I'll take you there,"
     }
   ]
 }

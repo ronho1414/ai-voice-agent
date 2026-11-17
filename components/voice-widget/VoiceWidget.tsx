@@ -8,7 +8,7 @@ import { AudioQueue, preloadClips, type AudioQueueState } from "@/lib/voice-engi
 import { createMicrophoneListener, type MicrophoneListener } from "@/lib/voice-engine/microphone";
 import { joinSpeech, revealSpeech } from "@/lib/voice-engine/speech-text";
 import type { SiteMap } from "@/lib/voice-engine/site-map";
-import { isIntent, isLang, type ChatRelayResult, type FastDecision } from "@/lib/voice-engine/types";
+import { isIntent, isLang, isSitePage, type ChatRelayResult, type FastDecision, type SitePageId } from "@/lib/voice-engine/types";
 
 const MOUNT_ID = "CURSOR_VOICE_WIDGET_MOUNT_POINT";
 
@@ -37,6 +37,15 @@ type ActiveSpeech = {
   holdText: boolean;
   finished: boolean;
 };
+
+function currentSitePage(): SitePageId {
+  if (typeof window === "undefined") return "home";
+  const hash = window.location.hash.replace(/^#/, "");
+  if (isSitePage(hash)) return hash;
+  const page = new URLSearchParams(window.location.search).get("page") ?? "";
+  if (isSitePage(page)) return page;
+  return "home";
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -139,6 +148,7 @@ export function VoiceWidget({
   const buffersRef = useRef<Map<string, AudioBuffer>>(new Map());
   const abortRef = useRef<AbortController | null>(null);
   const turnRef = useRef(0);
+  const spokenTurnsRef = useRef(0);
   const lineIdRef = useRef(0);
   const inflightRef = useRef(false);
   const speakerOnRef = useRef(true);
@@ -430,9 +440,15 @@ export function VoiceWidget({
     abortRef.current = controller;
     setError("");
 
-    const fast = postJson("/api/fast-decision", { text, siteMap }, controller.signal)
+    const turnCount = (spokenTurnsRef.current += 1);
+    const currentPage = currentSitePage();
+    const fast = postJson(
+      "/api/fast-decision",
+      { text, siteMap, currentPage, turnCount },
+      controller.signal,
+    )
       .then((payload) => {
-        if (turnRef.current !== turn || activeRef.current !== active) return;
+        if (turnRef.current !== turn || activeRef.current !== active) return null;
         const decision = readDecision(payload);
         active.opener = decision.clipText;
         if (active.holdText || !speakerOnRef.current) {
@@ -446,30 +462,45 @@ export function VoiceWidget({
         if (decision.navigateUrl !== "NONE" && decision.pageName) {
           openSitePage(decision.navigateUrl, decision.sectionId, decision.pageName);
         }
+        return decision;
       })
       .catch((reason: unknown) => {
-        if (turnRef.current !== turn || controller.signal.aborted) return;
+        if (turnRef.current !== turn || controller.signal.aborted) return null;
         if (!active.holdText) queue.skipClip(generation);
         setError(publicError(reason));
+        return null;
       });
 
-    const relay = postJson("/api/chat-relay", { text, knowledgeBasePath }, controller.signal)
-      .then(async (payload) => {
+    const relay = fast.then(async (decision) => {
+      if (turnRef.current !== turn || activeRef.current !== active) return;
+      const body = decision
+        ? {
+            text,
+            knowledgeBasePath,
+            currentPage,
+            turnCount,
+            openerTranscript: decision.clipText,
+            lang: decision.lang,
+          }
+        : { text, knowledgeBasePath, currentPage, turnCount };
+      try {
+        const payload = await postJson("/api/chat-relay", body, controller.signal);
         if (turnRef.current !== turn || activeRef.current !== active) return;
         const result = readRelay(payload);
         active.reply = result.reply;
+        if (!active.opener) active.opener = result.clipText;
         if (active.holdText || !speakerOnRef.current) {
           active.holdText = true;
           publishActive(active);
           return;
         }
         await pumpReply(turn, generation, result, controller.signal);
-      })
-      .catch((reason: unknown) => {
+      } catch (reason: unknown) {
         if (turnRef.current !== turn || controller.signal.aborted) return;
         queue.failStream(generation);
         setError(publicError(reason));
-      });
+      }
+    });
 
     await Promise.allSettled([fast, relay]);
     if (turnRef.current !== turn || activeRef.current !== active) return;

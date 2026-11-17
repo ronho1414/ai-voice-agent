@@ -2,7 +2,15 @@ import { clipFor } from "@/lib/voice-engine/clips-config";
 import { requireEnv } from "@/lib/voice-engine/env";
 import { loadClipsConfig, loadSiteMap } from "@/lib/voice-engine/read-config";
 import { selectRoute, type SiteMap } from "@/lib/voice-engine/site-map";
-import { isIntent, isLang, type FastDecision, type Intent, type Lang } from "@/lib/voice-engine/types";
+import {
+  isIntent,
+  isLang,
+  type FastDecision,
+  type Intent,
+  type Lang,
+  type SitePageId,
+  type TurnContext,
+} from "@/lib/voice-engine/types";
 
 type ChoiceAnswer = {
   choice: string;
@@ -22,20 +30,59 @@ type OpenerCache = {
   promise: Promise<OpenerDecision> | null;
 };
 
+const FIRST_TURN: readonly Intent[] = [
+  "greeting",
+  "company_intro",
+  "navigate_pricing",
+  "navigate_advantages",
+  "compare_bots",
+  "ask_timeline",
+  "ask_voice_clone",
+  "price_objection",
+  "booking_demo",
+  "deep_lookup",
+];
+
+const FOLLOW_UP: readonly Intent[] = ["follow_up_ack", "follow_up_detail", "follow_up_nav"];
+
 const INTENT_CRITERIA: Record<Intent, string> = {
   greeting: "Hello, hi, or 你好 with no real question about the company, price, product, or booking.",
-  company_intro: "Asks what the company does, what is special, or for a basic introduction. Not a price, PDF, or booking request.",
-  navigate_pricing: "Asks the price, the plans, or to compare Starter, Growth, and Enterprise.",
-  navigate_advantages: "Asks about the PDF knowledge base, hallucination control, or how the technology works.",
-  deep_lookup: "Asks a specific clause, an industry case detail, or an unusual detailed question that is not a greeting, intro, price, product overview, or booking.",
+  company_intro: "Asks what the company does or for a basic introduction, and the guest is not already on the pricing or advantages page.",
+  navigate_pricing: "Asks the price, the plans, or to compare Starter, Growth, and Enterprise. Prefer this on the pricing page.",
+  navigate_advantages: "Asks about the PDF knowledge base, uploading files, or how the knowledge base is managed. Prefer this on the advantages page.",
+  compare_bots: "Compares VoicePilot with a traditional text chatbot or a scripted bot.",
+  ask_timeline: "Asks how long onboarding or going live takes.",
+  ask_voice_clone: "Asks about cloning a real person's voice or a branded voice.",
+  price_objection: "Says the price is high, asks for a discount, or asks about paying yearly.",
   booking_demo: "Wants to book a demo, leave contact details, or have the team follow up.",
+  deep_lookup: "Asks a specific clause or unusual detail that is not a greeting, intro, price, PDF overview, comparison, timeline, voice clone, discount, or booking.",
+  follow_up_ack: "A short acknowledgement is enough. The guest is confirming or the next line does not need a new explanation or a page change.",
+  follow_up_detail: "The guest wants a fuller explanation and should stay on the current page. On pricing, this is a plan comparison. On advantages, this is the knowledge-base files.",
+  follow_up_nav: "The guest wants to open another page, the plans, the knowledge base, or the demo form.",
 };
 
 const FORCED_PAGE: Partial<Record<Intent, { url: string; sectionId?: string }>> = {
   navigate_pricing: { url: "pricing" },
+  price_objection: { url: "pricing" },
+  ask_voice_clone: { url: "pricing" },
   navigate_advantages: { url: "advantages" },
   booking_demo: { url: "about", sectionId: "demo-booking-form" },
 };
+
+const DEFAULT_CONTEXT: TurnContext = { currentPage: "home", turnCount: 1 };
+
+function criteriaFor(intents: readonly Intent[]): Record<string, string> {
+  const criteria: Record<string, string> = {};
+  for (const intent of intents) criteria[intent] = INTENT_CRITERIA[intent];
+  return criteria;
+}
+
+function applyPageBias(intent: Intent, page: SitePageId, turnCount: number): Intent {
+  if (turnCount > 1) return intent;
+  if (page === "pricing" && intent === "company_intro") return "navigate_pricing";
+  if (page === "advantages" && intent === "company_intro") return "navigate_advantages";
+  return intent;
+}
 
 const LANG_CRITERIA: Record<Lang, string> = {
   yue: "Hong Kong Cantonese, including spoken particles such as 嘅, 咗, 喺, 唔.",
@@ -108,18 +155,23 @@ async function jevChoices(
   return payload.answers;
 }
 
-async function runOpener(text: string): Promise<OpenerDecision> {
+async function runOpener(text: string, context: TurnContext): Promise<OpenerDecision> {
+  const followUp = context.turnCount > 1;
+  const allowed = followUp ? FOLLOW_UP : FIRST_TURN;
   const answers = await jevChoices(
     {
       utterance: text,
+      currentPage: context.currentPage,
+      turnCount: context.turnCount,
       setting: "VoicePilot AI website. The speaker is a senior voice-solution specialist, not a clinic receptionist.",
     },
     {
       intent: {
         type: "choice",
-        instructions:
-          "Which opener should play first? Use greeting only for hello. Use company_intro for what the company does. Use navigate_pricing for price or plans. Use navigate_advantages for PDF, hallucination control, or how it works. Use booking_demo when they want a demo or to leave contact details. Use deep_lookup only for a specific clause, case detail, or unusual question. Do not use deep_lookup for a greeting, a company introduction, a price, or a booking.",
-        criteria: INTENT_CRITERIA,
+        instructions: followUp
+          ? `This is a follow-up, turn ${context.turnCount}, and the guest is on ${context.currentPage}. Choose only a short bridge. Use follow_up_nav only when they want another page. Use follow_up_detail when they want more explanation. On pricing, prefer a plan-comparison tone. On advantages, prefer a knowledge-base file tone. Use follow_up_ack otherwise. Do not choose a long first-turn opener.`
+          : `This is the first turn and the guest is on ${context.currentPage}. Choose one unfinished half-sentence opener. Use greeting only for hello. On pricing, prefer navigate_pricing or price_objection when they ask about the company, plans, or cost. On advantages, prefer navigate_advantages when they ask about the company, PDFs, or files. Use deep_lookup only for a specific unusual detail.`,
+        criteria: criteriaFor(allowed),
       },
       lang: {
         type: "choice",
@@ -130,13 +182,14 @@ async function runOpener(text: string): Promise<OpenerDecision> {
     },
   );
 
-  const intentAnswer = readChoice(answers.intent, Object.keys(INTENT_CRITERIA));
+  const intentAnswer = readChoice(answers.intent, allowed);
   const langAnswer = readChoice(answers.lang, Object.keys(LANG_CRITERIA));
   if (!isIntent(intentAnswer.choice) || !isLang(langAnswer.choice)) {
     throw new Error("Jev request failed (bad response)");
   }
 
-  const clip = clipFor(loadClipsConfig(), intentAnswer.choice, langAnswer.choice);
+  const intent = applyPageBias(intentAnswer.choice, context.currentPage, context.turnCount);
+  const clip = clipFor(loadClipsConfig(), intent, langAnswer.choice);
   return {
     intent: clip.intent,
     lang: clip.lang,
@@ -145,14 +198,15 @@ async function runOpener(text: string): Promise<OpenerDecision> {
   };
 }
 
-export function decideOpener(text: string): Promise<OpenerDecision> {
+export function decideOpener(text: string, context: TurnContext = DEFAULT_CONTEXT): Promise<OpenerDecision> {
   const now = Date.now();
   const cache = openerCache();
-  if (cache.key === text && cache.expires > now && cache.promise) {
+  const key = `${text}|${context.currentPage}|${context.turnCount > 1 ? "follow" : "first"}`;
+  if (cache.key === key && cache.expires > now && cache.promise) {
     return cache.promise;
   }
 
-  const promise = runOpener(text).catch((error: unknown) => {
+  const promise = runOpener(text, context).catch((error: unknown) => {
     const current = openerCache();
     if (current.promise === promise) {
       current.key = "";
@@ -162,7 +216,7 @@ export function decideOpener(text: string): Promise<OpenerDecision> {
     throw error;
   });
 
-  cache.key = text;
+  cache.key = key;
   cache.expires = now + 20_000;
   cache.promise = promise;
   return promise;
@@ -223,9 +277,17 @@ function navigationFor(intent: Intent, siteMap: SiteMap) {
   };
 }
 
-export async function decideFast(text: string, siteMap: SiteMap = loadSiteMap()): Promise<FastDecision> {
-  const [opener, route] = await Promise.all([decideOpener(text), decideRoute(text, siteMap)]);
-  const navigation = navigationFor(opener.intent, siteMap) ?? route;
+export async function decideFast(
+  text: string,
+  siteMap: SiteMap = loadSiteMap(),
+  context: TurnContext = DEFAULT_CONTEXT,
+): Promise<FastDecision> {
+  const [opener, route] = await Promise.all([decideOpener(text, context), decideRoute(text, siteMap)]);
+  const stay =
+    opener.intent === "follow_up_ack" || opener.intent === "follow_up_detail"
+      ? { navigateUrl: "NONE", sectionId: null, pageName: null, confidence: 0 }
+      : null;
+  const navigation = stay ?? navigationFor(opener.intent, siteMap) ?? route;
   return {
     intent: opener.intent,
     lang: opener.lang,

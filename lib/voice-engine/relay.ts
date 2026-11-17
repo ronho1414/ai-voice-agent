@@ -2,7 +2,7 @@ import { requireEnv } from "@/lib/voice-engine/env";
 import { loadKnowledgeFile } from "@/lib/voice-engine/read-config";
 import { decideOpener } from "@/lib/voice-engine/decision";
 import { buildSystemPrompt, guardReply } from "@/lib/voice-engine/prompt";
-import type { ChatRelayResult } from "@/lib/voice-engine/types";
+import type { ChatRelayResult, Lang, TurnContext } from "@/lib/voice-engine/types";
 
 function readMessage(payload: unknown): string {
   if (typeof payload !== "object" || payload === null) {
@@ -76,8 +76,10 @@ async function completeReply(system: string, text: string): Promise<string> {
 export async function relayChat(
   text: string,
   knowledgeBasePath = "knowledge-base/company-info.md",
+  spoken?: { clipText: string; lang: Lang },
+  context?: TurnContext,
 ): Promise<ChatRelayResult> {
-  const opener = await decideOpener(text);
+  const opener = spoken ?? (await decideOpener(text, context));
   const knowledge = loadKnowledgeFile(knowledgeBasePath);
   const system = buildSystemPrompt(knowledge, opener.clipText, opener.lang);
   const raw = await completeReply(system, text);
