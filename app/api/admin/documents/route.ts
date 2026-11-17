@@ -7,7 +7,7 @@ import { fail, json } from "@/lib/http";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_BYTES = 8 * 1024 * 1024;
+const MAX_BYTES = 4 * 1024 * 1024;
 
 function siteFrom(request: Request): string {
   return readSiteId(new URL(request.url).searchParams.get("siteId"));
