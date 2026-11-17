@@ -233,6 +233,7 @@ export function VoiceWidget({
   const [timings, setTimings] = useState<VoiceTimings | null>(null);
   const [messages, setMessages] = useState<ChatLine[]>([]);
   const [draft, setDraft] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
   const clipKey = clips.join("|");
 
@@ -241,7 +242,6 @@ export function VoiceWidget({
   listeningRef.current = listening;
 
   const getPlaybackLevel = useCallback(() => queueRef.current?.getLevel() ?? 0, []);
-  const getMicLevel = useCallback(() => micLevelRef.current, []);
 
   function writeAssistant(active: ActiveSpeech, text: string): void {
     if (!text || active.finished) return;
@@ -408,6 +408,7 @@ export function VoiceWidget({
   function closePanel(): void {
     openRef.current = false;
     setOpen(false);
+    setSettingsOpen(false);
     listenerRef.current?.stop();
     listeningRef.current = false;
     setListening(false);
@@ -434,6 +435,17 @@ export function VoiceWidget({
     // openPanel reads refs and the listener created on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onPointer = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest("[data-voice-settings]")) return;
+      setSettingsOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    return () => document.removeEventListener("mousedown", onPointer);
+  }, [settingsOpen]);
 
   function openSitePage(pageId: string, sectionId: string | null, pageName: string): void {
     setHint(`正在為您前往：${pageName}`);
@@ -693,139 +705,185 @@ export function VoiceWidget({
     if (!listeningRef.current) beginListening();
   }
 
+  function callLive(): boolean {
+    const queue = queueRef.current;
+    const playing = queue !== null && queue.getState() !== "IDLE";
+    return listeningRef.current || playing || inflightRef.current;
+  }
+
+  function onCallPress(): void {
+    if (callLive()) {
+      if (queueRef.current?.getState() !== "IDLE" || inflightRef.current) bargeInFromUser();
+      listenerRef.current?.stop();
+      listeningRef.current = false;
+      setListening(false);
+      setTranscribing(false);
+      return;
+    }
+    beginListening();
+  }
+
   const talking = queueState !== "IDLE" && speakerOn;
+  const inCall = listening || transcribing || queueState !== "IDLE";
+  const callLabel = inCall ? "結束通話" : "開始通話";
   const status = talking ? "講緊" : transcribing ? "識別緊" : listening ? "聆聽緊" : "準備麥克風";
-  const showOrb = open && talking;
 
   const panel = (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[80] flex w-[min(28rem,calc(100vw-1.5rem))] flex-col items-end gap-3">
+    <div className="pointer-events-none fixed bottom-4 right-4 z-[80] flex w-[min(28rem,calc(100vw-1.5rem))] flex-col items-end">
       {open ? (
         <section
           id="voice-widget-panel"
           role="dialog"
           aria-label="語音專員"
-          className="pointer-events-auto flex h-[min(40rem,calc(100dvh-6.5rem))] w-full flex-col overflow-hidden rounded-3xl border border-[#E2E8F0] bg-[#F4F7FB] text-[#0A2540] shadow-stripe-lg"
+          className="pointer-events-auto flex h-[min(44rem,calc(100dvh-2rem))] w-full flex-col overflow-hidden rounded-[1.75rem] bg-white text-[#101828] shadow-stripe-lg"
           data-queue-state={queueState}
           data-clip-count={clipCount}
           data-listening={listening ? "true" : "false"}
           data-speaker={speakerOn ? "on" : "off"}
           data-caption={caption}
         >
-          <header className="flex items-center justify-between gap-3 border-b border-[#E2E8F0] bg-white px-4 py-3">
-            <div>
-              <p className="text-sm font-extrabold">語音專員</p>
-              <p className="text-xs text-[#425466]">{status}</p>
-            </div>
-            <div className="flex items-center gap-2">
+          <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center px-6">
+            <div className="relative">
+              <SpeakingOrb getLevel={getPlaybackLevel} />
               <button
                 type="button"
-                role="switch"
-                aria-checked={speakerOn}
-                aria-label={speakerOn ? "關閉語音播放" : "開啟語音播放"}
-                onClick={toggleSpeaker}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${
-                  speakerOn ? "bg-[#635BFF] text-white" : "bg-[#E8EDF5] text-[#425466]"
-                }`}
+                onClick={onCallPress}
+                aria-label={callLabel}
+                className="absolute bottom-0 left-1/2 z-10 grid h-14 w-14 -translate-x-1/2 translate-y-1/2 place-items-center rounded-full border-[3px] border-white bg-black text-white shadow-[0_8px_18px_rgba(16,24,40,0.18)]"
               >
-                <SpeakerIcon muted={!speakerOn} />
-                <span>{speakerOn ? "聲音開" : "聲音關"}</span>
-              </button>
-              <button
-                type="button"
-                onClick={closePanel}
-                aria-label="關閉"
-                className="rounded-lg px-2 py-1 text-xs font-semibold text-[#425466] hover:bg-[#F6F9FC]"
-              >
-                關閉
+                <PhoneIcon className="h-6 w-6" />
               </button>
             </div>
-          </header>
-          {hint ? (
-            <p className="bg-white px-4 py-2 text-sm font-medium text-[#635BFF]" aria-live="polite">
-              {hint}
+            <p className="sr-only" aria-live="polite">
+              {status}
             </p>
-          ) : null}
-          {error ? <p className="bg-white px-4 py-2 text-sm text-red-600">{error}</p> : null}
-          <div className="flex min-h-0 flex-1 flex-col">
-            {showOrb ? (
-              <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-4 py-4">
-                <SpeakingOrb getLevel={getPlaybackLevel} caption={caption} onInterrupt={bargeInFromUser} />
+            {caption || hint || error ? (
+              <div className="mt-10 flex w-full flex-col items-center gap-2">
+                {caption ? (
+                  <p className="max-w-[18rem] bg-black px-3 py-2 text-center text-sm font-semibold leading-5 text-white" aria-live="polite">
+                    {caption}
+                  </p>
+                ) : null}
+                {hint ? (
+                  <p className="text-center text-sm font-medium text-[#635BFF]" aria-live="polite">
+                    {hint}
+                  </p>
+                ) : null}
+                {error ? <p className="text-center text-sm text-red-600">{error}</p> : null}
               </div>
             ) : null}
-            <div ref={threadRef} className="flex min-h-36 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
-              {messages.length === 0 ? (
-                <p className="px-4 pt-6 text-center text-sm leading-6 text-[#425466]">
-                  直接講，或者打字。我會先出一句開場白，再答重點。
-                </p>
-              ) : null}
+          </div>
+          {messages.length > 0 ? (
+            <div ref={threadRef} className="max-h-28 space-y-1 overflow-y-auto px-5 pb-2 text-sm leading-6">
               {messages.map((line) => (
-                <div key={line.id} className={line.role === "user" ? "flex justify-end" : "flex justify-start"} data-role={line.role}>
-                  <p
-                    className={
-                      line.role === "user"
-                        ? "max-w-[85%] rounded-2xl rounded-br-md bg-[#635BFF] px-3.5 py-2.5 text-sm leading-6 text-white"
-                        : "max-w-[85%] rounded-2xl rounded-bl-md border border-[#E2E8F0] bg-white px-3.5 py-2.5 text-sm leading-6 text-[#0A2540] shadow-stripe-sm"
-                    }
-                  >
-                    {line.text}
-                  </p>
-                </div>
+                <p key={line.id} data-role={line.role} className={line.role === "user" ? "text-right text-[#667085]" : "text-[#101828]"}>
+                  {line.text}
+                </p>
               ))}
             </div>
-          </div>
-          <footer className="border-t border-[#E2E8F0] bg-white">
+          ) : (
+            <div ref={threadRef} />
+          )}
+          <form onSubmit={sendDraft} className="px-4 pb-4">
             {timings ? (
-              <p className="px-4 pt-2 text-[11px] leading-4 text-[#425466]" data-voice-timings="true">
+              <p className="px-1 pb-1 text-[10px] leading-4 text-[#98A2B3]" data-voice-timings="true">
                 sttMs {timings.sttMs} · fastPathMs {timings.fastPathMs ?? "—"} · llmFirstTokenMs{" "}
                 {timings.llmFirstTokenMs ?? "—"} · slowPathAudioMs {timings.slowPathAudioMs ?? "—"}
               </p>
             ) : null}
-            <form onSubmit={sendDraft} className="flex items-center gap-2 px-3 pt-3">
+            <div className="rounded-[1.35rem] border border-[#E4E7EC] bg-white px-3 pb-2.5 pt-3">
               <input
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
-                placeholder="打字問我"
-                aria-label="打字問我"
+                placeholder="發送訊息以開始聊天"
+                aria-label="發送訊息以開始聊天"
                 maxLength={2000}
                 autoComplete="off"
-                className="min-w-0 flex-1 rounded-full border border-[#E2E8F0] bg-[#F6F9FC] px-3 py-2 text-sm text-[#0A2540] outline-none focus:border-[#635BFF]"
+                className="w-full bg-transparent px-1 pb-2 text-sm text-[#101828] outline-none placeholder:text-[#98A2B3]"
               />
-              <button
-                type="submit"
-                aria-label="送出"
-                className="shrink-0 rounded-full bg-[#635BFF] px-3 py-2 text-xs font-semibold text-white hover:bg-[#5249F5]"
-              >
-                送出
-              </button>
-            </form>
-            <div className="flex items-center gap-3 px-4 py-3">
-              <button
-                type="button"
-                onClick={onMicPress}
-                aria-label={talking || transcribing ? "打斷" : "麥克風"}
-                className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#635BFF] text-white"
-              >
-                <MicPulse getLevel={getMicLevel} />
-                <MicIcon />
-              </button>
-              <p className="text-sm text-[#425466]">{status}</p>
+              <div className="flex items-center gap-1.5">
+                <div className="relative" data-voice-settings="">
+                  <button
+                    type="button"
+                    aria-label="設定"
+                    aria-expanded={settingsOpen}
+                    aria-controls="voice-widget-settings"
+                    onClick={() => setSettingsOpen((current) => !current)}
+                    className="grid h-9 w-9 place-items-center rounded-full text-[#667085] hover:bg-[#F2F4F7]"
+                  >
+                    <GearIcon />
+                  </button>
+                  {settingsOpen ? (
+                    <div
+                      id="voice-widget-settings"
+                      className="absolute bottom-11 left-0 z-20 w-40 rounded-2xl border border-[#E4E7EC] bg-white p-1.5 shadow-stripe-md"
+                    >
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={speakerOn}
+                        aria-label={speakerOn ? "關閉語音播放" : "開啟語音播放"}
+                        onClick={toggleSpeaker}
+                        className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm text-[#101828] hover:bg-[#F2F4F7]"
+                      >
+                        <SpeakerIcon muted={!speakerOn} />
+                        <span>{speakerOn ? "聲音開" : "聲音關"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={closePanel}
+                        className="flex w-full rounded-xl px-2.5 py-2 text-left text-sm text-[#101828] hover:bg-[#F2F4F7]"
+                      >
+                        關閉
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={onMicPress}
+                  aria-label={talking || transcribing ? "打斷" : "麥克風"}
+                  className={`grid h-9 w-9 place-items-center rounded-full hover:bg-[#F2F4F7] ${
+                    listening ? "text-[#101828]" : "text-[#667085]"
+                  }`}
+                >
+                  <MicIcon />
+                </button>
+                <button
+                  type="button"
+                  onClick={onCallPress}
+                  aria-label={callLabel}
+                  className="inline-flex items-center gap-1.5 rounded-full px-1 py-1 text-sm font-medium text-[#E11D48]"
+                >
+                  <span className="grid h-5 w-5 place-items-center rounded-full bg-[#E11D48] text-white">
+                    <PhoneIcon className="h-3 w-3" />
+                  </span>
+                  電話
+                </button>
+                <div className="flex-1" />
+                <button
+                  type="submit"
+                  aria-label="送出"
+                  className="grid h-11 w-11 place-items-center rounded-full bg-black text-white"
+                >
+                  <PlayIcon />
+                </button>
+              </div>
             </div>
-          </footer>
+          </form>
         </section>
-      ) : null}
-      <button
-        type="button"
-        onClick={() => {
-          if (openRef.current) closePanel();
-          else openPanel();
-        }}
-        aria-expanded={open}
-        aria-controls="voice-widget-panel"
-        className="pointer-events-auto inline-flex h-14 w-14 items-center justify-center rounded-full bg-[#635BFF] text-white shadow-stripe-md hover:bg-[#5249F5]"
-        aria-label="語音專員助手"
-      >
-        <MicIcon />
-      </button>
+      ) : (
+        <button
+          type="button"
+          onClick={openPanel}
+          aria-expanded={open}
+          aria-controls="voice-widget-panel"
+          className="pointer-events-auto inline-flex h-14 w-14 items-center justify-center rounded-full bg-black text-white shadow-stripe-md"
+          aria-label="語音專員助手"
+        >
+          <PhoneIcon className="h-6 w-6" />
+        </button>
+      )}
     </div>
   );
 
@@ -834,37 +892,41 @@ export function VoiceWidget({
   return panel;
 }
 
-function MicPulse({ getLevel }: { getLevel: () => number }) {
-  const [scale, setScale] = useState(1);
-
-  useEffect(() => {
-    let frame = 0;
-    let shown = 0;
-    const tick = () => {
-      shown += (getLevel() - shown) * 0.45;
-      const next = 1 + Math.min(0.7, shown * 9);
-      setScale((current) => (Math.abs(current - next) < 0.03 ? current : next));
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [getLevel]);
-
+function MicIcon() {
   return (
-    <span
-      aria-hidden="true"
-      className="absolute inset-0 rounded-full bg-[#635BFF]/30"
-      style={{ transform: `scale(${scale})` }}
-    />
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="M12 3.5a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-5 0V6A2.5 2.5 0 0 1 12 3.5Z" />
+      <path d="M7 11a5 5 0 0 0 10 0" />
+      <path d="M12 16v3.5" />
+    </svg>
   );
 }
 
-function MicIcon() {
+function PhoneIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" className="relative h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-      <path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z" />
-      <path d="M19 11a7 7 0 0 1-14 0" />
-      <path d="M12 18v3" />
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+      <path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.5.6 3.6.1.4 0 .7-.3 1l-2.2 2.2Z" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1.1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"
+      />
+    </svg>
+  );
+}
+
+function PlayIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="ml-0.5 h-4 w-4" fill="currentColor" aria-hidden="true">
+      <path d="M8 5.2v13.6L19 12 8 5.2Z" />
     </svg>
   );
 }

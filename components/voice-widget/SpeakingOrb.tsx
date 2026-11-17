@@ -2,15 +2,10 @@
 
 import { useEffect, useState } from "react";
 
-export function SpeakingOrb({
-  getLevel,
-  caption,
-  onInterrupt,
-}: {
-  getLevel: () => number;
-  caption: string;
-  onInterrupt: () => void;
-}) {
+const ORB_SPIN =
+  "conic-gradient(from 210deg, #073888 0deg, #3ecfff 24deg, #0a4ec8 52deg, #9cf6ff 78deg, #0d46b8 112deg, #f4fffe 146deg, #1258dc 178deg, #5ad8ff 210deg, #ffffff 238deg, #0e62e6 270deg, #c8fbff 304deg, #083888 336deg, #073888 360deg)";
+
+export function SpeakingOrb({ getLevel }: { getLevel: () => number }) {
   const [energy, setEnergy] = useState(0);
 
   useEffect(() => {
@@ -26,61 +21,36 @@ export function SpeakingOrb({
     return () => cancelAnimationFrame(frame);
   }, [getLevel]);
 
-  const core = 1 + energy * 0.18;
-  const ring = 1 + energy * 0.48;
-  const halo = 1 + energy * 0.12;
+  const scale = 1 + energy * 0.06;
 
   return (
-    <div className="flex flex-col items-center gap-4" data-orb="true">
+    <div className="grid place-items-center" data-orb="true" style={{ transform: `scale(${scale})` }}>
       <style>{`
-        @keyframes voice-widget-orb-breathe {
-          0%, 100% { opacity: 0.38; }
-          50% { opacity: 1; }
+        @keyframes voice-widget-orb-spin {
+          to { transform: rotate(360deg); }
         }
         @media (prefers-reduced-motion: no-preference) {
-          .voice-widget-orb-ring { animation: voice-widget-orb-breathe 1.6s ease-in-out infinite; }
+          .voice-widget-orb-spin { animation: voice-widget-orb-spin 18s linear infinite; }
+          .voice-widget-orb-spin[data-speaking="true"] { animation-duration: 7s; }
         }
       `}</style>
-      <button
-        type="button"
-        onClick={onInterrupt}
-        aria-label="打斷語音"
-        className="relative grid h-44 w-44 place-items-center"
-      >
-        <span
-          aria-hidden="true"
-          className="voice-widget-orb-ring absolute h-40 w-40 rounded-full border border-[#E4E4E4]"
-          style={{ transform: `scale(${ring})` }}
-        />
-        <span
-          aria-hidden="true"
-          className="absolute h-32 w-32 rounded-full bg-white"
-          style={{
-            transform: `scale(${halo})`,
-            boxShadow: `0 0 ${28 + energy * 36}px rgba(255, 255, 255, 0.95)`,
-          }}
-        />
-        <span
-          aria-hidden="true"
-          className="h-28 w-28 rounded-full"
-          style={{
-            transform: `scale(${core})`,
-            background:
-              "radial-gradient(circle at 38% 32%, #f4f7e6 0%, #d7e4b4 46%, #c3d59a 78%, #b4c78b 100%)",
-            boxShadow: `0 12px ${28 + energy * 42}px rgba(168, 190, 126, ${0.28 + energy * 0.45})`,
-          }}
-        />
-      </button>
-      {caption ? (
-        <p
-          className="max-w-[18rem] bg-black px-3 py-2 text-center text-sm font-semibold leading-5 text-white"
-          aria-live="polite"
-        >
-          {caption}
-        </p>
-      ) : (
-        <p className="h-9" aria-hidden="true" />
-      )}
+      <div className="relative h-[min(15rem,42dvh)] w-[min(15rem,42dvh)]">
+        <div className="absolute inset-0 overflow-hidden rounded-full shadow-[inset_0_0_24px_rgba(255,255,255,0.18)]">
+          <div
+            className="voice-widget-orb-spin absolute -inset-10"
+            data-speaking={energy > 0.04 ? "true" : "false"}
+            style={{ background: ORB_SPIN, filter: "blur(2px)" }}
+          />
+          <div
+            aria-hidden="true"
+            className="absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(circle at 84% 48%, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.28) 12%, rgba(255,255,255,0) 34%)",
+            }}
+          />
+        </div>
+      </div>
     </div>
   );
 }
