@@ -1,0 +1,41 @@
+{
+  "threshold": 0.75,
+  "pages": [
+    {
+      "url": "/",
+      "name": "主頁",
+      "keywords": {
+        "yue": ["主頁", "首頁", "返去主頁", "開頭"],
+        "zh": ["主页", "首页", "回到首页"],
+        "en": ["home", "homepage", "main page"]
+      }
+    },
+    {
+      "url": "/services",
+      "name": "療程服務",
+      "keywords": {
+        "yue": ["療程", "服務", "療程服務", "有咩療程"],
+        "zh": ["疗程", "服务", "疗程服务", "有什么项目"],
+        "en": ["services", "treatments", "treatment menu"]
+      }
+    },
+    {
+      "url": "/pricing",
+      "name": "價目表",
+      "keywords": {
+        "yue": ["價目", "價目表", "價錢", "幾錢"],
+        "zh": ["价目", "价目表", "价格", "多少钱"],
+        "en": ["pricing", "price", "price list", "how much"]
+      }
+    },
+    {
+      "url": "/booking",
+      "name": "網上預約",
+      "keywords": {
+        "yue": ["預約", "網上預約", "約時間", "訂位"],
+        "zh": ["预约", "网上预约", "订时间"],
+        "en": ["booking", "book", "appointment", "reserve"]
+      }
+    }
+  ]
+}
