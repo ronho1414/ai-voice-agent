@@ -36,11 +36,19 @@ export function ensureEnv(): void {
   loadEnvFile(STORE_ENV);
 }
 
+const ENV_ALIASES: Record<string, readonly string[]> = {
+  DEEPGRAM_API_KEY: ["DEEPGRAM"],
+  JEV_API_KEY: ["JEV"],
+  ELEVENLABS_API_KEY: ["ELEVENLABS"],
+  OPENROUTER_API_KEY: ["OPENROUTER"],
+};
+
 export function requireEnv(name: string): string {
   ensureEnv();
-  const value = process.env[name]?.trim();
-  if (!value) {
-    throw new Error(`Missing ${name}`);
+  const names = [name, ...(ENV_ALIASES[name] ?? [])];
+  for (const key of names) {
+    const value = process.env[key]?.trim();
+    if (value) return value;
   }
-  return value;
+  throw new Error(`Missing ${name}`);
 }

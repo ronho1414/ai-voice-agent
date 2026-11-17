@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { SpeakingOrb } from "@/components/voice-widget/SpeakingOrb";
 import { AudioQueue, preloadClips, type AudioQueueState } from "@/lib/voice-engine/audio-queue";
@@ -151,6 +151,7 @@ export function VoiceWidget({
   const [error, setError] = useState("");
   const [caption, setCaption] = useState("");
   const [messages, setMessages] = useState<ChatLine[]>([]);
+  const [draft, setDraft] = useState("");
   const threadRef = useRef<HTMLDivElement>(null);
   const clipKey = clips.join("|");
 
@@ -523,6 +524,19 @@ export function VoiceWidget({
     });
   }
 
+  function sendDraft(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    const text = draft.trim();
+    if (!text) return;
+    setDraft("");
+    const queue = queueRef.current;
+    const playing = queue !== null && queue.getState() !== "IDLE";
+    if (playing || inflightRef.current) bargeInFromUser();
+    const turn = turnRef.current;
+    inflightRef.current = true;
+    void runTurn(text, turn);
+  }
+
   function onMicPress(): void {
     const queue = queueRef.current;
     const playing = queue !== null && queue.getState() !== "IDLE";
@@ -595,7 +609,7 @@ export function VoiceWidget({
             <div ref={threadRef} className="flex min-h-36 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
               {messages.length === 0 ? (
                 <p className="px-4 pt-6 text-center text-sm leading-6 text-[#425466]">
-                  直接講就得。我會先出一句開場白，再答重點。
+                  直接講，或者打字。我會先出一句開場白，再答重點。
                 </p>
               ) : null}
               {messages.map((line) => (
@@ -613,17 +627,37 @@ export function VoiceWidget({
               ))}
             </div>
           </div>
-          <footer className="flex items-center gap-3 border-t border-[#E2E8F0] bg-white px-4 py-3">
-            <button
-              type="button"
-              onClick={onMicPress}
-              aria-label={talking || transcribing ? "打斷" : "麥克風"}
-              className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#635BFF] text-white"
-            >
-              <MicPulse getLevel={getMicLevel} />
-              <MicIcon />
-            </button>
-            <p className="text-sm text-[#425466]">{status}</p>
+          <footer className="border-t border-[#E2E8F0] bg-white">
+            <form onSubmit={sendDraft} className="flex items-center gap-2 px-3 pt-3">
+              <input
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                placeholder="打字問我"
+                aria-label="打字問我"
+                maxLength={2000}
+                autoComplete="off"
+                className="min-w-0 flex-1 rounded-full border border-[#E2E8F0] bg-[#F6F9FC] px-3 py-2 text-sm text-[#0A2540] outline-none focus:border-[#635BFF]"
+              />
+              <button
+                type="submit"
+                aria-label="送出"
+                className="shrink-0 rounded-full bg-[#635BFF] px-3 py-2 text-xs font-semibold text-white hover:bg-[#5249F5]"
+              >
+                送出
+              </button>
+            </form>
+            <div className="flex items-center gap-3 px-4 py-3">
+              <button
+                type="button"
+                onClick={onMicPress}
+                aria-label={talking || transcribing ? "打斷" : "麥克風"}
+                className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#635BFF] text-white"
+              >
+                <MicPulse getLevel={getMicLevel} />
+                <MicIcon />
+              </button>
+              <p className="text-sm text-[#425466]">{status}</p>
+            </div>
           </footer>
         </section>
       ) : null}

@@ -1,7 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  outputFileTracingIncludes: {
+    "/api/fast-decision": ["./config/**/*"],
+    "/api/chat-relay": ["./config/**/*", "./knowledge-base/**/*"],
+    "/api/tts": ["./config/**/*"],
+  },
 };
 
 export default nextConfig;
