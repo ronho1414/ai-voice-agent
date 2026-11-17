@@ -214,6 +214,7 @@ export function VoiceWidget({
   const inflightRef = useRef(false);
   const speakerOnRef = useRef(true);
   const openRef = useRef(false);
+  const callOnRef = useRef(false);
   const listeningRef = useRef(false);
   const activeRef = useRef<ActiveSpeech | null>(null);
   const captionRef = useRef("");
@@ -226,6 +227,7 @@ export function VoiceWidget({
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [open, setOpen] = useState(false);
+  const [callOn, setCallOn] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(true);
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -238,6 +240,7 @@ export function VoiceWidget({
   const clipKey = clips.join("|");
 
   openRef.current = open;
+  callOnRef.current = callOn;
   speakerOnRef.current = speakerOn;
   listeningRef.current = listening;
 
@@ -384,31 +387,46 @@ export function VoiceWidget({
   function beginListening(): void {
     const listener = listenerRef.current;
     if (!listener) return;
+    callOnRef.current = true;
+    setCallOn(true);
     void listener
       .start()
       .then(() => {
-        if (!openRef.current || !listener.isRunning()) return;
+        if (!openRef.current || !callOnRef.current || !listener.isRunning()) return;
         listeningRef.current = true;
         setListening(true);
         setError("");
       })
       .catch(() => {
         listeningRef.current = false;
+        callOnRef.current = false;
         setListening(false);
+        setCallOn(false);
         setError("麥克風未獲允許");
       });
+  }
+
+  function hangUp(): void {
+    if (queueRef.current?.getState() !== "IDLE" || inflightRef.current) bargeInFromUser();
+    listenerRef.current?.stop();
+    listeningRef.current = false;
+    callOnRef.current = false;
+    setListening(false);
+    setCallOn(false);
+    setTranscribing(false);
   }
 
   function openPanel(): void {
     openRef.current = true;
     setOpen(true);
-    beginListening();
   }
 
   function closePanel(): void {
     openRef.current = false;
     setOpen(false);
     setSettingsOpen(false);
+    callOnRef.current = false;
+    setCallOn(false);
     listenerRef.current?.stop();
     listeningRef.current = false;
     setListening(false);
@@ -421,7 +439,10 @@ export function VoiceWidget({
   }
 
   useEffect(() => {
-    const openFromSite = () => openPanel();
+    const openFromSite = () => {
+      openPanel();
+      beginListening();
+    };
     const onClick = (event: MouseEvent) => {
       const target = event.target;
       if (target instanceof Element && target.closest("#open-voice-demo-btn")) openFromSite();
@@ -705,27 +726,13 @@ export function VoiceWidget({
     if (!listeningRef.current) beginListening();
   }
 
-  function callLive(): boolean {
-    const queue = queueRef.current;
-    const playing = queue !== null && queue.getState() !== "IDLE";
-    return listeningRef.current || playing || inflightRef.current;
-  }
-
   function onCallPress(): void {
-    if (callLive()) {
-      if (queueRef.current?.getState() !== "IDLE" || inflightRef.current) bargeInFromUser();
-      listenerRef.current?.stop();
-      listeningRef.current = false;
-      setListening(false);
-      setTranscribing(false);
-      return;
-    }
-    beginListening();
+    if (callOnRef.current) hangUp();
+    else beginListening();
   }
 
   const talking = queueState !== "IDLE" && speakerOn;
-  const inCall = listening || transcribing || queueState !== "IDLE";
-  const callLabel = inCall ? "結束通話" : "開始通話";
+  const callLabel = callOn ? "結束通話" : "開始通話";
   const status = talking ? "講緊" : transcribing ? "識別緊" : listening ? "聆聽緊" : "準備麥克風";
 
   const panel = (
@@ -744,12 +751,15 @@ export function VoiceWidget({
         >
           <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center px-6">
             <div className="relative">
-              <SpeakingOrb getLevel={getPlaybackLevel} />
+              <SpeakingOrb getLevel={getPlaybackLevel} expanded={callOn} />
               <button
                 type="button"
                 onClick={onCallPress}
                 aria-label={callLabel}
-                className="absolute bottom-0 left-1/2 z-10 grid h-14 w-14 -translate-x-1/2 translate-y-1/2 place-items-center rounded-full border-[3px] border-white bg-black text-white shadow-[0_8px_18px_rgba(16,24,40,0.18)]"
+                data-call={callOn ? "on" : "off"}
+                className={`absolute bottom-0 left-1/2 z-10 grid h-14 w-14 -translate-x-1/2 translate-y-1/2 place-items-center rounded-full border-[3px] border-white text-white shadow-[0_8px_18px_rgba(16,24,40,0.18)] ${
+                  callOn ? "bg-[#22C55E]" : "bg-[#E11D48]"
+                }`}
               >
                 <PhoneIcon className="h-6 w-6" />
               </button>

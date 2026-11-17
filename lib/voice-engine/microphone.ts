@@ -31,6 +31,7 @@ registerProcessor("utterance-capture", UtteranceCapture);
 
 const PREROLL_MS = 260;
 const HISTORY_MS = 600;
+const MIC_GAIN = 4;
 
 type PcmChunk = {
   at: number;
@@ -81,6 +82,15 @@ function rms(samples: Float32Array): number {
   let sum = 0;
   for (let i = 0; i < samples.length; i += 1) sum += samples[i] * samples[i];
   return Math.sqrt(sum / samples.length);
+}
+
+function boost(samples: Float32Array): Float32Array {
+  const out = new Float32Array(samples.length);
+  for (let i = 0; i < samples.length; i += 1) {
+    const value = samples[i] * MIC_GAIN;
+    out[i] = value > 1 ? 1 : value < -1 ? -1 : value;
+  }
+  return out;
 }
 
 export type MicrophoneListener = {
@@ -138,13 +148,14 @@ export function createMicrophoneListener(
 
   function onSamples(samples: Float32Array): void {
     if (!running || samples.length === 0) return;
+    const heard = boost(samples);
     const sampleRate = context.sampleRate || 48000;
     const at = (cursor / sampleRate) * 1000;
-    const dt = (samples.length / sampleRate) * 1000;
-    cursor += samples.length;
-    chunks.push({ at, samples });
+    const dt = (heard.length / sampleRate) * 1000;
+    cursor += heard.length;
+    chunks.push({ at, samples: heard });
 
-    const level = rms(samples);
+    const level = rms(heard);
     smoothed = smoothed * 0.62 + level * 0.38;
     handlers.onLevel(smoothed);
     const audible = !endpoint.active && performance.now() < quietUntil ? 0 : smoothed;
@@ -213,8 +224,9 @@ export function createMicrophoneListener(
       const pending = navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
-          noiseSuppression: true,
+          noiseSuppression: false,
           autoGainControl: true,
+          channelCount: 1,
         },
       });
       opening = open(pending);

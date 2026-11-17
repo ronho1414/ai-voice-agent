@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 const ORB_SPIN =
   "conic-gradient(from 210deg, #073888 0deg, #3ecfff 24deg, #0a4ec8 52deg, #9cf6ff 78deg, #0d46b8 112deg, #f4fffe 146deg, #1258dc 178deg, #5ad8ff 210deg, #ffffff 238deg, #0e62e6 270deg, #c8fbff 304deg, #083888 336deg, #073888 360deg)";
 
-export function SpeakingOrb({ getLevel }: { getLevel: () => number }) {
+export function SpeakingOrb({ getLevel, expanded }: { getLevel: () => number; expanded: boolean }) {
   const [energy, setEnergy] = useState(0);
 
   useEffect(() => {
@@ -34,7 +34,12 @@ export function SpeakingOrb({ getLevel }: { getLevel: () => number }) {
           .voice-widget-orb-spin[data-speaking="true"] { animation-duration: 7s; }
         }
       `}</style>
-      <div className="relative h-[min(15rem,42dvh)] w-[min(15rem,42dvh)]">
+      <div
+        data-orb-size={expanded ? "live" : "idle"}
+        className={`relative transition-[width,height] duration-300 ${
+          expanded ? "h-[min(18.75rem,50dvh)] w-[min(18.75rem,50dvh)]" : "h-[min(15rem,42dvh)] w-[min(15rem,42dvh)]"
+        }`}
+      >
         <div className="absolute inset-0 overflow-hidden rounded-full shadow-[inset_0_0_24px_rgba(255,255,255,0.18)]">
           <div
             className="voice-widget-orb-spin absolute -inset-10"

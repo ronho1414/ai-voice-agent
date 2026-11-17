@@ -10,10 +10,10 @@ export type EndpointState = {
 
 export type EndpointEvent = "start" | "end" | null;
 
-const CALIBRATION_MS = 280;
-const ATTACK_MS = 150;
-const RELEASE_MS = 720;
-const MIN_VOICED_MS = 240;
+const CALIBRATION_MS = 180;
+const ATTACK_MS = 80;
+const RELEASE_MS = 640;
+const MIN_VOICED_MS = 160;
 const MAX_UTTERANCE_MS = 14_000;
 
 export function createEndpointState(): EndpointState {
@@ -29,9 +29,9 @@ export function createEndpointState(): EndpointState {
 }
 
 export function endpointThreshold(noise: number, playback: boolean): number {
-  const floor = Math.max(0.012, noise * 3.4);
+  const floor = Math.max(0.007, noise * 2.4);
   if (!playback) return floor;
-  return Math.max(0.06, floor * 4.5);
+  return Math.max(0.02, floor * 2.2);
 }
 
 export function feedEndpoint(
