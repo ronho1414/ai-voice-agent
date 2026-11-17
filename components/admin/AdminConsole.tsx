@@ -305,7 +305,7 @@ export function AdminConsole() {
                     }`}
                   >
                     <span className="text-sm font-semibold">拖放 PDF 到呢度，或者撳一下揀檔</span>
-                    <span className="mt-2 text-xs text-[#425466]">只接受 .pdf，上限 8 MB。上傳後會抽出文字。</span>
+                    <span className="mt-2 text-xs text-[#425466]">只接受 .pdf，上限 4 MB。上傳後會抽出文字。</span>
                     <input
                       type="file"
                       accept="application/pdf,.pdf"

@@ -43,9 +43,13 @@ export function isAdminRequest(request: Request): boolean {
   return timingSafeEqual(left, right);
 }
 
-export function adminCookie(authenticated: boolean): string {
-  if (!authenticated) return `${ADMIN_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
-  const token = sessionToken() ?? "";
+function cookieSuffix(maxAge: number): string {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `${ADMIN_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${COOKIE_MAX_AGE}${secure}`;
+  return `Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
+}
+
+export function adminCookie(authenticated: boolean): string {
+  if (!authenticated) return `${ADMIN_COOKIE}=; ${cookieSuffix(0)}`;
+  const token = sessionToken() ?? "";
+  return `${ADMIN_COOKIE}=${encodeURIComponent(token)}; ${cookieSuffix(COOKIE_MAX_AGE)}`;
 }

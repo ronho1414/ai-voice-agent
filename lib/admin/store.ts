@@ -49,6 +49,7 @@ const KNOWLEDGE_LIMIT = 16_000;
 const QUERY_TIMEOUT_MS = 1_500;
 
 let memory: LocalStore = EMPTY;
+let hydrated = false;
 let writeQueue: Promise<void> = Promise.resolve();
 
 function supabaseAdmin(): SupabaseClient | null {
@@ -64,7 +65,18 @@ function storePath(): string {
   return path.join(process.cwd(), "data", "admin-store.json");
 }
 
-async function readLocal(): Promise<LocalStore> {
+function enqueue<T>(task: () => Promise<T>): Promise<T> {
+  const run = writeQueue.then(task, task);
+  writeQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+async function hydrate(): Promise<void> {
+  if (hydrated) return;
+  hydrated = true;
   try {
     const raw = await readFile(storePath(), "utf8");
     const parsed = JSON.parse(raw) as Partial<LocalStore>;
@@ -73,23 +85,29 @@ async function readLocal(): Promise<LocalStore> {
       logs: Array.isArray(parsed.logs) ? parsed.logs : [],
     };
   } catch {
-    // A missing file means this process is still on the in-memory copy.
+    memory = { documents: [], logs: [] };
   }
-  return memory;
 }
 
-function persist(next: LocalStore): Promise<void> {
-  memory = next;
-  writeQueue = writeQueue.then(async () => {
+async function readLocal(): Promise<LocalStore> {
+  return enqueue(async () => {
+    await hydrate();
+    return { documents: memory.documents.slice(), logs: memory.logs.slice() };
+  });
+}
+
+async function changeLocal(change: (store: LocalStore) => LocalStore): Promise<void> {
+  await enqueue(async () => {
+    await hydrate();
+    memory = change(memory);
     try {
       const file = storePath();
       await mkdir(path.dirname(file), { recursive: true });
-      await writeFile(file, JSON.stringify(next), "utf8");
+      await writeFile(file, JSON.stringify(memory), "utf8");
     } catch {
       // The disk may be read-only. The in-memory copy still serves this process.
     }
   });
-  return writeQueue;
 }
 
 function summarize(document: DocumentRecord): DocumentSummary {
@@ -135,14 +153,18 @@ export async function createDocument(
   input: Omit<DocumentRecord, "id" | "created_at"> & { bytes?: Uint8Array },
 ): Promise<{ mode: StoreMode; document: DocumentSummary }> {
   const document = cleanDocument({
-    ...input,
     id: crypto.randomUUID(),
+    site_id: input.site_id,
+    file_name: input.file_name,
+    file_size: input.file_size,
+    extracted_text: input.extracted_text,
+    page_count: input.page_count,
+    is_active: input.is_active,
     created_at: new Date().toISOString(),
   });
   const supabase = supabaseAdmin();
   if (!supabase) {
-    const store = await readLocal();
-    await persist({ ...store, documents: [document, ...store.documents] });
+    await changeLocal((store) => ({ ...store, documents: [document, ...store.documents] }));
     return { mode: "local", document: summarize(document) };
   }
 
@@ -168,8 +190,7 @@ export async function createDocument(
     created_at: document.created_at,
   });
   if (error) {
-    const store = await readLocal();
-    await persist({ ...store, documents: [document, ...store.documents] });
+    await changeLocal((store) => ({ ...store, documents: [document, ...store.documents] }));
     return { mode: "local", document: summarize(document) };
   }
   return { mode: "supabase", document: summarize(document) };
@@ -178,15 +199,18 @@ export async function createDocument(
 export async function setDocumentActive(siteId: string, id: string, isActive: boolean): Promise<StoreMode> {
   const supabase = supabaseAdmin();
   if (!supabase) {
-    const store = await readLocal();
-    const found = store.documents.some((item) => item.id === id && item.site_id === siteId);
-    if (!found) throw new Error("Document was not found");
-    await persist({
-      ...store,
-      documents: store.documents.map((item) =>
-        item.id === id && item.site_id === siteId ? { ...item, is_active: isActive } : item,
-      ),
+    let found = false;
+    await changeLocal((store) => {
+      found = store.documents.some((item) => item.id === id && item.site_id === siteId);
+      if (!found) return store;
+      return {
+        ...store,
+        documents: store.documents.map((item) =>
+          item.id === id && item.site_id === siteId ? { ...item, is_active: isActive } : item,
+        ),
+      };
     });
+    if (!found) throw new Error("Document was not found");
     return "local";
   }
 
@@ -204,13 +228,16 @@ export async function setDocumentActive(siteId: string, id: string, isActive: bo
 export async function deleteDocument(siteId: string, id: string): Promise<StoreMode> {
   const supabase = supabaseAdmin();
   if (!supabase) {
-    const store = await readLocal();
-    const found = store.documents.some((item) => item.id === id && item.site_id === siteId);
-    if (!found) throw new Error("Document was not found");
-    await persist({
-      ...store,
-      documents: store.documents.filter((item) => !(item.id === id && item.site_id === siteId)),
+    let found = false;
+    await changeLocal((store) => {
+      found = store.documents.some((item) => item.id === id && item.site_id === siteId);
+      if (!found) return store;
+      return {
+        ...store,
+        documents: store.documents.filter((item) => !(item.id === id && item.site_id === siteId)),
+      };
     });
+    if (!found) throw new Error("Document was not found");
     return "local";
   }
 
@@ -231,8 +258,9 @@ export async function activeKnowledge(siteId: string): Promise<string | null> {
     let used = 0;
     const parts: string[] = [];
     for (const document of documents) {
-      const block = `${document.file_name}\n${document.extracted_text}`.trim();
-      if (!block) continue;
+      const text = document.extracted_text.trim();
+      if (!text) continue;
+      const block = `${document.file_name}\n${text}`;
       if (used + block.length > KNOWLEDGE_LIMIT) {
         parts.push(block.slice(0, Math.max(0, KNOWLEDGE_LIMIT - used)));
         break;
@@ -273,8 +301,7 @@ async function activeFromSupabase(supabase: SupabaseClient, siteId: string): Pro
 export async function insertConversation(record: ConversationRecord): Promise<void> {
   const supabase = supabaseAdmin();
   if (!supabase) {
-    const store = await readLocal();
-    await persist({ ...store, logs: [record, ...store.logs].slice(0, 1000) });
+    await changeLocal((store) => ({ ...store, logs: [record, ...store.logs].slice(0, 1000) }));
     return;
   }
   const { error } = await supabase.from("conversation_logs").insert(record);
