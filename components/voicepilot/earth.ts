@@ -251,6 +251,10 @@ export function mountVoicePilotEarth(): () => void {
     lastY = event.clientY;
     vel.x = dy * 0.005;
     vel.y = dx * 0.005;
+    if (!reduced) {
+      spin.rotation.x += vel.x;
+      spin.rotation.y += vel.y;
+    }
   }
 
   function onPointerUp(): void {

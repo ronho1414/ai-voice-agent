@@ -25,10 +25,10 @@ export const VOICEPILOT_MARKUP = `
     </button>
     <div class="nav-links" id="nav-links">
       <button type="button" class="nav-btn-outline is-active" id="nav-tab-home" data-page="home" onclick="navigateToPage('home')">首頁</button>
-      <button type="button" class="nav-btn-outline" data-page="home" onclick="scrollToSection('features')">功能</button>
+      <button type="button" class="nav-btn-outline" onclick="scrollToSection('features')">功能</button>
       <button type="button" class="nav-btn-outline" id="nav-tab-advantages" data-page="advantages" onclick="navigateToPage('advantages')">核心優勢</button>
       <button type="button" class="nav-btn-outline" id="nav-tab-pricing" data-page="pricing" onclick="navigateToPage('pricing')">收費方案</button>
-      <button type="button" class="nav-btn-outline" data-page="home" onclick="scrollToSection('use-cases')">適用行業</button>
+      <button type="button" class="nav-btn-outline" onclick="scrollToSection('use-cases')">適用行業</button>
       <button type="button" class="nav-btn-outline" id="nav-tab-about" data-page="about" onclick="navigateToPage('about')">關於我們</button>
       <button type="button" class="nav-btn-outline nav-cta" onclick="navigateToPage('about', { sectionId: 'demo-booking-form' })">預約 Demo</button>
     </div>

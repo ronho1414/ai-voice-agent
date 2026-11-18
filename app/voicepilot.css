@@ -573,6 +573,13 @@ html.vp-world body {
   color: var(--primary-glow);
 }
 
+.section-follow,
+.faq-list {
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  scroll-margin-top: 5.5rem;
+}
+
 .section-follow {
   position: relative;
   z-index: 10;
