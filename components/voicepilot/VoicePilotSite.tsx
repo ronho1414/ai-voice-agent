@@ -8,7 +8,6 @@ declare global {
   interface Window {
     navigateToPage?: (pageId: string, options?: unknown) => void;
     initVoicePilotSite?: () => void;
-    lucide?: { createIcons: () => void };
     __voicePilotBooted?: boolean;
   }
 }
@@ -23,6 +22,7 @@ function openRequestedPage(): void {
 
 export function VoicePilotSite() {
   useEffect(() => {
+    document.documentElement.classList.add("vp-world");
     if (!window.__voicePilotBooted) {
       const script = document.createElement("script");
       script.dataset.voicepilot = "site";
@@ -35,36 +35,22 @@ export function VoicePilotSite() {
     openRequestedPage();
 
     let cancelled = false;
-    const paintIcons = () => {
-      if (!cancelled) window.lucide?.createIcons();
-    };
-    const existing = document.querySelector<HTMLScriptElement>('script[data-lucide-cdn="true"]');
-    if (window.lucide) {
-      paintIcons();
-    } else if (!existing) {
-      const lucide = document.createElement("script");
-      lucide.src = "https://unpkg.com/lucide@latest";
-      lucide.async = true;
-      lucide.dataset.lucideCdn = "true";
-      lucide.onload = () => {
-        paintIcons();
-        window.initVoicePilotSite?.();
-        openRequestedPage();
-      };
-      document.body.appendChild(lucide);
-    } else {
-      existing.addEventListener("load", paintIcons);
-    }
+    let stopEarth = () => {};
+    void import("@/components/voicepilot/earth")
+      .then((mod) => {
+        if (!cancelled) stopEarth = mod.mountVoicePilotEarth();
+      })
+      .catch(() => {
+        const fallback = document.getElementById("earth-fallback");
+        if (fallback) fallback.hidden = false;
+      });
 
     return () => {
       cancelled = true;
+      stopEarth();
+      document.documentElement.classList.remove("vp-world");
     };
   }, []);
 
-  return (
-    <div
-      className="bg-white text-[#0A2540] antialiased selection:bg-[#635BFF]/15 selection:text-[#635BFF]"
-      dangerouslySetInnerHTML={{ __html: VOICEPILOT_MARKUP }}
-    />
-  );
+  return <div className="vp-world" dangerouslySetInnerHTML={{ __html: VOICEPILOT_MARKUP }} />;
 }
