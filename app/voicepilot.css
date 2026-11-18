@@ -891,8 +891,69 @@ html.vp-world body {
   }
 
   .section-follow {
-    padding-left: 4rem;
-    padding-right: 4rem;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .section-follow .follow-title,
+  .section-follow .faq-list {
+    padding-left: 0.85rem;
+    padding-right: 0.85rem;
+  }
+
+  .table-scroll {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    overflow: visible;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    background: rgba(5, 5, 16, 0.78);
+  }
+
+  .compare-table {
+    min-width: 0;
+    width: 100%;
+    table-layout: fixed;
+    font-size: 0.74rem;
+  }
+
+  .compare-table th,
+  .compare-table td {
+    padding: 0.55rem 0.16rem;
+    overflow-wrap: break-word;
+    vertical-align: top;
+  }
+
+  .compare-table th:first-child,
+  .compare-table td:first-child {
+    width: 28%;
+    padding-left: 0.55rem;
+  }
+
+  .compare-table th:last-child,
+  .compare-table td:last-child {
+    padding-right: 0.45rem;
+  }
+
+  .compare-table th:nth-child(n + 2) {
+    width: 24%;
+  }
+
+  .compare-table .check-label,
+  .compare-table #diff-row-counter {
+    display: block;
+    min-width: 0;
+    font-size: 0.74rem;
+    white-space: normal;
+  }
+
+  .compare-table thead th {
+    position: sticky;
+    top: 5.25rem;
+    z-index: 4;
+    background: rgba(5, 5, 16, 0.96);
   }
 
   .section-product .section-copy,
