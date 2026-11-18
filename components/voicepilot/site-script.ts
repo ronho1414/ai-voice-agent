@@ -1,1 +1,392 @@
-export const VOICEPILOT_SCRIPT = "const VALID_PAGES = ['home', 'advantages', 'pricing', 'about'];\n    let currentActivePage = 'home';\n    let currentBillingCycle = 'monthly';\n\n    const PLAN_DISPLAY_LABELS = {\n      starter: '商業啟動版 Starter',\n      growth: '專業成長版 Growth',\n      enterprise: '全渠道企業版 Enterprise'\n    };\n\n    const HERO_SAMPLES = [\n      {\n        question: '「呢款療程第一次試做幾錢？有冇額外收費？」',\n        reply: '新客試做價 HK$980 全包，我依家帶你去預約區。'\n      },\n      {\n        question: '「1,200 萬樓齡 35 年嘅物業最高可以做到幾成按揭？」',\n        reply: '按最新內部指引最高可做 7 成按揭，我帶你睇按揭計算區。'\n      },\n      {\n        question: '「我想預約今個星期五下午 3 點過嚟尖沙咀分店諮詢」',\n        reply: '無問題，星期五下午 3 點有位，我幫你跳轉到預約表單。'\n      }\n    ];\n\n    const INDUSTRY_SHOWCASES = [\n      {\n        tag: '零售電商 · 實時語音導購',\n        title: '由第一句查詢開始，已經似真人對答',\n        sub: '電話、WhatsApp 同網站查詢，用同一把品牌聲音與企業知識庫服務客戶。',\n        query: '「邊款禮盒套裝最適合送禮？有冇現貨可以今日寄出？」',\n        action: 'AI 已依據庫存表回答，並自動跳轉至皇牌禮盒專頁',\n        img: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1600&q=80'\n      },\n      {\n        tag: '金融保險 · 合規條款精準解答',\n        title: '嚴格依據保障手冊 PDF，零偏差回應保單查詢',\n        sub: '將數百頁產品條款與理賠細則匯入知識庫，24 小時解答客戶保障範圍。',\n        query: '「呢份高端醫療計劃包唔包日間門診手術同 MRI 檢查？」',\n        action: 'AI 已根據 2026 保障細則準確作答，並引導預約持牌顧問',\n        img: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1600&q=80'\n      },\n      {\n        tag: '地產代理 · 智能搵樓與預約睇樓',\n        title: '聽明預算、校網與按揭需求，秒速篩選心水盤源',\n        sub: '訪客唔使自己逐個篩選器慢慢撳，開口講需求即刻跳轉對應樓盤介紹。',\n        query: '「我想搵九龍站一帶兩房單位，預算 1,400 萬左右，有冇推介？」',\n        action: 'AI 已篩選 3 個符合預算放盤，並自動打開平面圖與睇樓預約',\n        img: 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1600&q=80'\n      },\n      {\n        tag: '醫療美容 · 24 小時療程諮詢與分流',\n        title: '深夜瀏覽網站一樣有專業治療師級別語音解答',\n        sub: '根據診所最新試做價目表回答儀器分別與恢復期，直接引導填寫預約。',\n        query: '「Pico 激光同普通彩光有咩分別？做完要唔要戒口？」',\n        action: 'AI 已依據療程手冊清晰解答，並跳轉至新客試做登記表單',\n        img: 'https://images.unsplash.com/photo-1629909613654-28e377c37b09?auto=format&fit=crop&w=1600&q=80'\n      },\n      {\n        tag: '教育培訓 · 課程配對與試堂登記',\n        title: '根據學生年級與目標，自動推介最合適課程時間表',\n        sub: '匯入最新學期章程與學費表，即時回應家長查詢並收集試堂資料。',\n        query: '「小朋友下年升小一，想報 phonics 同面試班，星期六有冇堂？」',\n        action: 'AI 已核對星期六時間表作答，並帶家長前往免費評估登記頁',\n        img: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1600&q=80'\n      },\n      {\n        tag: '旅遊酒店 · 三語禮賓與房型預訂',\n        title: '中英日韓訪客無障礙查詢，縮短預訂決策時間',\n        sub: '即時回應機場接送、延遲退房及套票優惠，直接帶客進入預訂結帳。',\n        query: '「Do you have sea-view family suites available this weekend with breakfast?」',\n        action: 'AI 已用流利英語確認海景套房供應，並自動跳轉至預訂頁面',\n        img: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1600&q=80'\n      }\n    ];\n\n    // -----------------------------------------------------------------------\n    // 1. 多頁面導航控制器\n    // -----------------------------------------------------------------------\n    window.navigateToPage = function(pageId, options) {\n      const targetPage = VALID_PAGES.includes(pageId) ? pageId : 'home';\n      currentActivePage = targetPage;\n\n      let targetSectionId = null;\n      let selectedPlan = null;\n\n      if (typeof options === 'string') {\n        targetSectionId = options;\n      } else if (options && typeof options === 'object') {\n        targetSectionId = options.sectionId || null;\n        selectedPlan = options.selectedPlan || null;\n      }\n\n      VALID_PAGES.forEach(id => {\n        const el = document.getElementById(`page-${id}`);\n        if (!el) return;\n        if (id === targetPage) {\n          el.classList.remove('page-view-hidden');\n          el.classList.add('page-view-active');\n        } else {\n          el.classList.add('page-view-hidden');\n          el.classList.remove('page-view-active');\n        }\n      });\n\n      updateNavbarActiveState(targetPage);\n\n      if (selectedPlan && PLAN_DISPLAY_LABELS[selectedPlan]) {\n        const selectEl = document.getElementById('inquiry-note');\n        const bannerEl = document.getElementById('selected-plan-banner');\n        const bannerTextEl = document.getElementById('selected-plan-banner-text');\n        if (selectEl) {\n          selectEl.value = selectedPlan;\n        }\n        if (bannerEl && bannerTextEl) {\n          const cycleLabel = currentBillingCycle === 'annual' ? '按年預繳 · 8 折優惠' : '按月收費';\n          bannerTextEl.textContent = `✓ 已為你預選：${PLAN_DISPLAY_LABELS[selectedPlan]}（${cycleLabel}）`;\n          bannerEl.classList.remove('hidden');\n        }\n      }\n\n      if (window.location.hash !== `#${targetPage}` && !targetSectionId) {\n        history.replaceState(null, '', `#${targetPage}`);\n      }\n\n      if (targetSectionId) {\n        setTimeout(() => {\n          const targetEl = document.getElementById(targetSectionId);\n          if (targetEl) {\n            targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });\n          }\n        }, 60);\n      } else {\n        window.scrollTo({ top: 0, behavior: 'smooth' });\n      }\n\n      setTimeout(() => {\n        initScrollAnimations();\n        if (window.lucide) window.lucide.createIcons();\n      }, 50);\n    };\n\n    function updateNavbarActiveState(activePage) {\n      VALID_PAGES.forEach(id => {\n        const desktopBtn = document.getElementById(`nav-tab-${id}`);\n        const mobileBtn = document.getElementById(`mobile-tab-${id}`);\n\n        if (desktopBtn) {\n          if (id === activePage) {\n            desktopBtn.classList.add('text-[#635BFF]', 'font-bold');\n            desktopBtn.classList.remove('text-[#425466]', 'font-semibold');\n          } else {\n            desktopBtn.classList.remove('text-[#635BFF]', 'font-bold');\n            desktopBtn.classList.add('text-[#425466]', 'font-semibold');\n          }\n        }\n\n        if (mobileBtn) {\n          if (id === activePage) {\n            mobileBtn.classList.add('bg-white', 'text-[#635BFF]', 'font-bold', 'shadow-stripe-sm');\n            mobileBtn.classList.remove('text-[#425466]', 'font-semibold');\n          } else {\n            mobileBtn.classList.remove('bg-white', 'text-[#635BFF]', 'font-bold', 'shadow-stripe-sm');\n            mobileBtn.classList.add('text-[#425466]', 'font-semibold');\n          }\n        }\n      });\n\n      const activeTabEl = document.getElementById(`nav-tab-${activePage}`);\n      const indicatorEl = document.getElementById('nav-active-indicator');\n      if (activeTabEl && indicatorEl) {\n        indicatorEl.style.width = `${activeTabEl.offsetWidth}px`;\n        indicatorEl.style.transform = `translateX(${activeTabEl.offsetLeft}px)`;\n      }\n    }\n\n    // -----------------------------------------------------------------------\n    // 2. 頂部語音體驗觸發與自定義事件廣播 (供右下角 Cursor Widget 監聽)\n    // -----------------------------------------------------------------------\n    function handleVoiceDemoTrigger() {\n      const banner = document.getElementById('voice-guide-banner');\n      if (banner) {\n        banner.classList.remove('hidden');\n      }\n      window.dispatchEvent(new CustomEvent('voicepilot:open-widget', {\n        detail: { source: 'website-cta', currentPage: currentActivePage }\n      }));\n    }\n\n    function hideVoiceBanner() {\n      const banner = document.getElementById('voice-guide-banner');\n      if (banner) {\n        banner.classList.add('hidden');\n      }\n    }\n\n    // -----------------------------------------------------------------------\n    // 3. 首頁互動邏輯：Hero 問句切換、核心技術手風琴展開、行業橫幅聯動\n    // -----------------------------------------------------------------------\n    function switchHeroSample(idx) {\n      const sample = HERO_SAMPLES[idx];\n      if (!sample) return;\n\n      const qEl = document.getElementById('hero-demo-question');\n      const rEl = document.getElementById('hero-demo-reply');\n      if (qEl) qEl.textContent = sample.question;\n      if (rEl) rEl.textContent = sample.reply;\n\n      HERO_SAMPLES.forEach((_, i) => {\n        const btn = document.getElementById(`hero-sample-btn-${i}`);\n        if (!btn) return;\n        if (i === idx) {\n          btn.classList.add('bg-white', 'font-bold', 'shadow-stripe-sm');\n          btn.classList.remove('bg-white/50', 'font-semibold');\n        } else {\n          btn.classList.remove('bg-white', 'font-bold', 'shadow-stripe-sm');\n          btn.classList.add('bg-white/50', 'font-semibold');\n        }\n      });\n    }\n\n    function activateFeatureAccordion(activeIdx) {\n      [0, 1, 2].forEach(idx => {\n        const card = document.getElementById(`feat-acc-${idx}`);\n        const hud = document.getElementById(`feat-hud-${idx}`);\n        const desc = document.getElementById(`feat-desc-${idx}`);\n        if (!card) return;\n        const img = card.querySelector('.accordion-photo-img');\n\n        if (idx === activeIdx) {\n          card.style.flex = '2.8 1 0%';\n          if (img) img.style.transform = 'scale(1.1)';\n          if (hud) hud.classList.remove('opacity-0');\n          if (desc) desc.classList.remove('hidden');\n        } else {\n          card.style.flex = '1 1 0%';\n          if (img) img.style.transform = 'scale(1)';\n          if (hud) hud.classList.add('opacity-0');\n          if (desc) desc.classList.add('hidden');\n        }\n      });\n    }\n\n    function selectIndustryShowcase(idx) {\n      const item = INDUSTRY_SHOWCASES[idx];\n      if (!item) return;\n\n      const imgEl = document.getElementById('industry-banner-img');\n      const tagEl = document.getElementById('industry-banner-tag');\n      const titleEl = document.getElementById('industry-banner-title');\n      const subEl = document.getElementById('industry-banner-sub');\n      const queryEl = document.getElementById('industry-banner-query');\n      const actionEl = document.getElementById('industry-banner-action');\n\n      if (imgEl) {\n        imgEl.style.display = 'block';\n        imgEl.src = item.img;\n      }\n      if (tagEl) tagEl.textContent = item.tag;\n      if (titleEl) titleEl.textContent = item.title;\n      if (subEl) subEl.textContent = item.sub;\n      if (queryEl) queryEl.textContent = item.query;\n      if (actionEl) actionEl.textContent = item.action;\n\n      INDUSTRY_SHOWCASES.forEach((_, i) => {\n        const card = document.getElementById(`ind-card-${i}`);\n        if (!card) return;\n        if (i === idx) {\n          card.classList.add('border-2', 'border-[#635BFF]', 'shadow-stripe-md');\n          card.classList.remove('border', 'border-[#E2E8F0]', 'shadow-stripe-sm');\n        } else {\n          card.classList.remove('border-2', 'border-[#635BFF]', 'shadow-stripe-md');\n          card.classList.add('border', 'border-[#E2E8F0]', 'shadow-stripe-sm');\n        }\n      });\n    }\n\n    // -----------------------------------------------------------------------\n    // 4. 收費方案頁：按月 / 按年計費切換 ＋ TradingView 差異項目篩選 ＋ FAQ\n    // -----------------------------------------------------------------------\n    function setBillingCycle(cycle) {\n      currentBillingCycle = cycle;\n      const monthlyBtn = document.getElementById('billing-monthly-btn');\n      const annualBtn = document.getElementById('billing-annual-btn');\n\n      const starterAmount = document.getElementById('price-starter-amount');\n      const starterNote = document.getElementById('price-starter-note');\n      const setupStarterNote = document.getElementById('setup-starter-note');\n\n      const growthAmount = document.getElementById('price-growth-amount');\n      const growthNote = document.getElementById('price-growth-note');\n      const setupGrowthNote = document.getElementById('setup-growth-note');\n\n      const enterpriseAmount = document.getElementById('price-enterprise-amount');\n      const enterpriseNote = document.getElementById('price-enterprise-note');\n\n      const tableStarter = document.getElementById('table-price-starter');\n      const tableGrowth = document.getElementById('table-price-growth');\n      const tableEnterprise = document.getElementById('table-price-enterprise');\n\n      if (cycle === 'annual') {\n        annualBtn.classList.add('bg-white', 'text-[#0A2540]', 'shadow-stripe-sm');\n        annualBtn.classList.remove('text-[#425466]');\n        monthlyBtn.classList.remove('bg-white', 'text-[#0A2540]', 'shadow-stripe-sm');\n        monthlyBtn.classList.add('text-[#425466]');\n\n        starterAmount.textContent = 'HK$3,040';\n        starterNote.textContent = '按年預繳 HK$36,480（已慳 HK$9,120 / 年）';\n        if (setupStarterNote) {\n          setupStarterNote.textContent = 'HK$0（已豁免 HK$6,800）';\n          setupStarterNote.classList.add('text-emerald-700');\n        }\n\n        growthAmount.textContent = 'HK$7,040';\n        growthNote.textContent = '按年預繳 HK$84,480（已慳 HK$21,120 / 年）';\n        if (setupGrowthNote) {\n          setupGrowthNote.textContent = 'HK$0（已豁免 HK$12,800）';\n          setupGrowthNote.classList.add('text-emerald-700');\n        }\n\n        enterpriseAmount.textContent = 'HK$15,040';\n        enterpriseNote.textContent = '按年預繳 HK$180,480（已慳 HK$45,120 / 年）';\n\n        if (tableStarter) tableStarter.textContent = 'HK$3,040';\n        if (tableGrowth) tableGrowth.textContent = 'HK$7,040';\n        if (tableEnterprise) tableEnterprise.textContent = 'HK$15,040';\n      } else {\n        monthlyBtn.classList.add('bg-white', 'text-[#0A2540]', 'shadow-stripe-sm');\n        monthlyBtn.classList.remove('text-[#425466]');\n        annualBtn.classList.remove('bg-white', 'text-[#0A2540]', 'shadow-stripe-sm');\n        annualBtn.classList.add('text-[#425466]');\n\n        starterAmount.textContent = 'HK$3,800';\n        starterNote.textContent = '按月結算（按年預繳 HK$3,040 / 月）';\n        if (setupStarterNote) {\n          setupStarterNote.textContent = 'HK$6,800';\n          setupStarterNote.classList.remove('text-emerald-700');\n        }\n\n        growthAmount.textContent = 'HK$8,800';\n        growthNote.textContent = '按月結算（按年預繳 HK$7,040 / 月）';\n        if (setupGrowthNote) {\n          setupGrowthNote.textContent = 'HK$12,800';\n          setupGrowthNote.classList.remove('text-emerald-700');\n        }\n\n        enterpriseAmount.textContent = 'HK$18,800';\n        enterpriseNote.textContent = '按月結算（按年預繳 HK$15,040 / 月）';\n\n        if (tableStarter) tableStarter.textContent = 'HK$3,800';\n        if (tableGrowth) tableGrowth.textContent = 'HK$8,800';\n        if (tableEnterprise) tableEnterprise.textContent = 'HK$18,800';\n      }\n    }\n\n    function toggleDiffOnlyRows(onlyDiff) {\n      const rows = document.querySelectorAll('.comparison-feature-row');\n      let visibleCount = 0;\n\n      rows.forEach(row => {\n        const isSame = row.getAttribute('data-same') === 'true';\n        if (onlyDiff && isSame) {\n          row.classList.add('hidden');\n        } else {\n          row.classList.remove('hidden');\n          visibleCount += 1;\n        }\n      });\n\n      const counterEl = document.getElementById('diff-row-counter');\n      if (counterEl) {\n        counterEl.textContent = onlyDiff ? `差異 ${visibleCount} 項` : `全部 ${rows.length} 項`;\n      }\n    }\n\n    function toggleFaqItem(idx) {\n      const body = document.getElementById(`faq-body-${idx}`);\n      const icon = document.getElementById(`faq-icon-${idx}`);\n      if (!body || !icon) return;\n\n      const isHidden = body.classList.contains('hidden');\n      if (isHidden) {\n        body.classList.remove('hidden');\n        icon.classList.add('rotate-180', 'text-[#635BFF]');\n        icon.classList.remove('text-[#425466]');\n      } else {\n        body.classList.add('hidden');\n        icon.classList.remove('rotate-180', 'text-[#635BFF]');\n        icon.classList.add('text-[#425466]');\n      }\n    }\n\n    // -----------------------------------------------------------------------\n    // 5. 關於我們頁：Demo 預約表單提交處理\n    // -----------------------------------------------------------------------\n    function handleLeadSubmit(event) {\n      event.preventDefault();\n      const company = document.getElementById('company-name').value.trim();\n      const person = document.getElementById('contact-person').value.trim();\n      const phone = document.getElementById('contact-phone').value.trim();\n      const url = document.getElementById('website-url').value.trim();\n      const selectedPlanKey = document.getElementById('inquiry-note').value;\n      const planLabel = PLAN_DISPLAY_LABELS[selectedPlanKey] || selectedPlanKey;\n      const cycleLabel = currentBillingCycle === 'annual' ? '按年預繳（8 折）' : '按月收費';\n\n      document.getElementById('lead-form').classList.add('hidden');\n      document.getElementById('lead-form-success').classList.remove('hidden');\n      document.getElementById('lead-success-detail').textContent =\n        `感謝 ${person}（${company}）！我哋已經收到你為「${url}」預約【${planLabel} · ${cycleLabel}】專屬語音 Demo 嘅申請，香港顧問團隊將於 2 小時內透過 WhatsApp / 電話（${phone}）與你聯絡並傳送專屬測試連結。`;\n    }\n\n    function resetLeadForm() {\n      document.getElementById('lead-form').reset();\n      document.getElementById('lead-form-success').classList.add('hidden');\n      document.getElementById('lead-form').classList.remove('hidden');\n    }\n\n    // -----------------------------------------------------------------------\n    // 6. 滾動進場動畫與頁面初始化\n    // -----------------------------------------------------------------------\n    function initScrollAnimations() {\n      const observer = new IntersectionObserver((entries) => {\n        entries.forEach(entry => {\n          if (entry.isIntersecting) {\n            entry.target.classList.add('is-visible');\n            observer.unobserve(entry.target);\n          }\n        });\n      }, { threshold: 0.1 });\n\n      document.querySelectorAll('.reveal-on-scroll').forEach(el => observer.observe(el));\n    }\n\n    window.addEventListener('hashchange', onVoicePilotHashChange);\n    window.addEventListener('resize', onVoicePilotResize);\n\n    function initVoicePilotSite() {\n      if (window.lucide) {\n        window.lucide.createIcons();\n      }\n      const initialHash = window.location.hash.replace('#', '');\n      if (VALID_PAGES.includes(initialHash)) {\n        navigateToPage(initialHash);\n      } else {\n        updateNavbarActiveState('home');\n      }\n      initScrollAnimations();\n    }\n    window.__voicePilotTeardown = function () {\n      window.removeEventListener('hashchange', onVoicePilotHashChange);\n      window.removeEventListener('resize', onVoicePilotResize);\n    };\n    function onVoicePilotHashChange() {\n      const hashPage = window.location.hash.replace('#', '');\n      if (VALID_PAGES.includes(hashPage) && hashPage !== currentActivePage) {\n        navigateToPage(hashPage);\n      }\n    }\n    function onVoicePilotResize() {\n      updateNavbarActiveState(currentActivePage);\n    }\n    initVoicePilotSite();\n";
+export const VOICEPILOT_SCRIPT = `
+const VALID_PAGES = ['home', 'advantages', 'pricing', 'about'];
+let currentActivePage = 'home';
+let currentBillingCycle = 'monthly';
+
+const PLAN_DISPLAY_LABELS = {
+  starter: '商業啟動版 Starter',
+  growth: '專業成長版 Growth',
+  enterprise: '全渠道企業版 Enterprise'
+};
+
+const PAGE_TARGETS = {
+  home: 'hero',
+  advantages: 'advantages',
+  pricing: 'pricing',
+  about: 'about'
+};
+
+const BALL_BY_SECTION = {
+  hero: 'hero',
+  features: 'product',
+  advantages: 'solutions',
+  pricing: 'pricing',
+  'use-cases': 'usecases',
+  about: 'contact',
+  'demo-booking-form': 'contact'
+};
+
+const HERO_SAMPLES = [
+  {
+    question: '「呢款療程第一次試做幾錢？有冇額外收費？」',
+    reply: '新客試做價 HK$980 全包，我依家帶你去預約區。'
+  },
+  {
+    question: '「1,200 萬樓齡 35 年嘅物業最高可以做到幾成按揭？」',
+    reply: '按最新內部指引最高可做 7 成按揭，我帶你睇按揭計算區。'
+  },
+  {
+    question: '「我想預約今個星期五下午 3 點過嚟尖沙咀分店諮詢」',
+    reply: '無問題，星期五下午 3 點有位，我幫你跳轉到預約表單。'
+  }
+];
+
+const INDUSTRY_SHOWCASES = [
+  {
+    tag: '零售電商 · 實時語音導購',
+    title: '由第一句查詢開始，已經似真人對答',
+    sub: '電話、WhatsApp 同網站查詢，用同一把品牌聲音與企業知識庫服務客戶。',
+    query: '「邊款禮盒套裝最適合送禮？有冇現貨可以今日寄出？」',
+    action: 'AI 已依據庫存表回答，並自動跳轉至皇牌禮盒專頁',
+    img: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1600&q=80'
+  },
+  {
+    tag: '金融保險 · 合規條款精準解答',
+    title: '嚴格依據保障手冊 PDF，零偏差回應保單查詢',
+    sub: '將數百頁產品條款與理賠細則匯入知識庫，24 小時解答客戶保障範圍。',
+    query: '「呢份高端醫療計劃包唔包日間門診手術同 MRI 檢查？」',
+    action: 'AI 已根據 2026 保障細則準確作答，並引導預約持牌顧問',
+    img: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1600&q=80'
+  },
+  {
+    tag: '地產代理 · 智能搵樓與預約睇樓',
+    title: '聽明預算、校網與按揭需求，秒速篩選心水盤源',
+    sub: '訪客唔使自己逐個篩選器慢慢撳，開口講需求即刻跳轉對應樓盤介紹。',
+    query: '「我想搵九龍站一帶兩房單位，預算 1,400 萬左右，有冇推介？」',
+    action: 'AI 已篩選 3 個符合預算放盤，並自動打開平面圖與睇樓預約',
+    img: 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1600&q=80'
+  },
+  {
+    tag: '醫療美容 · 24 小時療程諮詢與分流',
+    title: '深夜瀏覽網站一樣有專業治療師級別語音解答',
+    sub: '根據診所最新試做價目表回答儀器分別與恢復期，直接引導填寫預約。',
+    query: '「Pico 激光同普通彩光有咩分別？做完要唔要戒口？」',
+    action: 'AI 已依據療程手冊清晰解答，並跳轉至新客試做登記表單',
+    img: 'https://images.unsplash.com/photo-1629909613654-28e377c37b09?auto=format&fit=crop&w=1600&q=80'
+  },
+  {
+    tag: '教育培訓 · 課程配對與試堂登記',
+    title: '根據學生年級與目標，自動推介最合適課程時間表',
+    sub: '匯入最新學期章程與學費表，即時回應家長查詢並收集試堂資料。',
+    query: '「小朋友下年升小一，想報 phonics 同面試班，星期六有冇堂？」',
+    action: 'AI 已核對星期六時間表作答，並帶家長前往免費評估登記頁',
+    img: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1600&q=80'
+  },
+  {
+    tag: '旅遊酒店 · 三語禮賓與房型預訂',
+    title: '中英日韓訪客無障礙查詢，縮短預訂決策時間',
+    sub: '即時回應機場接送、延遲退房及套票優惠，直接帶客進入預訂結帳。',
+    query: '「Do you have sea-view family suites available this weekend with breakfast?」',
+    action: 'AI 已用流利英語確認海景套房供應，並自動跳轉至預訂頁面',
+    img: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1600&q=80'
+  }
+];
+
+function reducedMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function scrollToId(id) {
+  const target = document.getElementById(id);
+  if (!target) return;
+  target.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' });
+  const ball = BALL_BY_SECTION[id];
+  if (ball) {
+    window.dispatchEvent(new CustomEvent('voicepilot:section', { detail: { ball: ball } }));
+  }
+}
+
+function closeSiteNav() {
+  const nav = document.getElementById('site-nav');
+  const toggle = document.getElementById('nav-toggle');
+  if (nav) nav.classList.remove('nav-active');
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.setAttribute('aria-label', '開啟選單');
+  }
+}
+
+function toggleSiteNav() {
+  const nav = document.getElementById('site-nav');
+  const toggle = document.getElementById('nav-toggle');
+  if (!nav || !toggle) return;
+  const open = nav.classList.toggle('nav-active');
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  toggle.setAttribute('aria-label', open ? '關閉選單' : '開啟選單');
+}
+
+function scrollToSection(sectionId) {
+  const page = sectionId === 'advantages'
+    ? 'advantages'
+    : sectionId === 'pricing'
+      ? 'pricing'
+      : sectionId === 'about' || sectionId === 'demo-booking-form'
+        ? 'about'
+        : 'home';
+  currentActivePage = page;
+  updateNavbarActiveState(page);
+  if (window.location.hash !== '#' + page) {
+    history.replaceState(null, '', '#' + page);
+  }
+  closeSiteNav();
+  scrollToId(sectionId);
+}
+
+window.navigateToPage = function(pageId, options) {
+  const targetPage = VALID_PAGES.includes(pageId) ? pageId : 'home';
+  currentActivePage = targetPage;
+
+  let targetSectionId = null;
+  let selectedPlan = null;
+  if (typeof options === 'string') {
+    targetSectionId = options;
+  } else if (options && typeof options === 'object') {
+    targetSectionId = options.sectionId || null;
+    selectedPlan = options.selectedPlan || null;
+  }
+
+  updateNavbarActiveState(targetPage);
+
+  if (selectedPlan && PLAN_DISPLAY_LABELS[selectedPlan]) {
+    const selectEl = document.getElementById('inquiry-note');
+    const bannerEl = document.getElementById('selected-plan-banner');
+    const bannerTextEl = document.getElementById('selected-plan-banner-text');
+    if (selectEl) selectEl.value = selectedPlan;
+    if (bannerEl && bannerTextEl) {
+      const cycleLabel = currentBillingCycle === 'annual' ? '按年預繳 · 8 折優惠' : '按月收費';
+      bannerTextEl.textContent = '已為你預選：' + PLAN_DISPLAY_LABELS[selectedPlan] + '（' + cycleLabel + '）';
+      bannerEl.classList.remove('hidden');
+    }
+  }
+
+  if (window.location.hash !== '#' + targetPage) {
+    history.replaceState(null, '', '#' + targetPage);
+  }
+
+  closeSiteNav();
+  scrollToId(targetSectionId || PAGE_TARGETS[targetPage]);
+};
+
+function updateNavbarActiveState(activePage) {
+  document.querySelectorAll('[data-page]').forEach((button) => {
+    const match = button.getAttribute('data-page') === activePage;
+    button.classList.toggle('is-active', match);
+    if (match) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
+}
+
+function handleVoiceDemoTrigger() {
+  const banner = document.getElementById('voice-guide-banner');
+  if (banner) banner.classList.remove('hidden');
+  window.dispatchEvent(new CustomEvent('voicepilot:open-widget', {
+    detail: { source: 'website-cta', currentPage: currentActivePage }
+  }));
+}
+
+function hideVoiceBanner() {
+  const banner = document.getElementById('voice-guide-banner');
+  if (banner) banner.classList.add('hidden');
+}
+
+function switchHeroSample(idx) {
+  const sample = HERO_SAMPLES[idx];
+  if (!sample) return;
+  const question = document.getElementById('hero-demo-question');
+  const reply = document.getElementById('hero-demo-reply');
+  if (question) question.textContent = sample.question;
+  if (reply) reply.textContent = sample.reply;
+  HERO_SAMPLES.forEach((_, i) => {
+    const button = document.getElementById('hero-sample-btn-' + i);
+    if (button) button.classList.toggle('is-active', i === idx);
+  });
+}
+
+function selectIndustryShowcase(idx) {
+  const item = INDUSTRY_SHOWCASES[idx];
+  if (!item) return;
+  const img = document.getElementById('industry-banner-img');
+  const tag = document.getElementById('industry-banner-tag');
+  const title = document.getElementById('industry-banner-title');
+  const sub = document.getElementById('industry-banner-sub');
+  const query = document.getElementById('industry-banner-query');
+  const action = document.getElementById('industry-banner-action');
+  if (img) {
+    img.hidden = false;
+    img.src = item.img;
+    img.alt = item.tag;
+  }
+  if (tag) tag.textContent = item.tag;
+  if (title) title.textContent = item.title;
+  if (sub) sub.textContent = item.sub;
+  if (query) query.textContent = item.query;
+  if (action) action.textContent = item.action;
+  INDUSTRY_SHOWCASES.forEach((_, i) => {
+    const card = document.getElementById('ind-card-' + i);
+    if (card) card.classList.toggle('is-active', i === idx);
+  });
+}
+
+function setBillingCycle(cycle) {
+  currentBillingCycle = cycle;
+  const monthlyBtn = document.getElementById('billing-monthly-btn');
+  const annualBtn = document.getElementById('billing-annual-btn');
+  if (monthlyBtn) monthlyBtn.classList.toggle('is-active', cycle !== 'annual');
+  if (annualBtn) annualBtn.classList.toggle('is-active', cycle === 'annual');
+
+  const starterAmount = document.getElementById('price-starter-amount');
+  const starterNote = document.getElementById('price-starter-note');
+  const setupStarterNote = document.getElementById('setup-starter-note');
+  const growthAmount = document.getElementById('price-growth-amount');
+  const growthNote = document.getElementById('price-growth-note');
+  const setupGrowthNote = document.getElementById('setup-growth-note');
+  const enterpriseAmount = document.getElementById('price-enterprise-amount');
+  const enterpriseNote = document.getElementById('price-enterprise-note');
+  const tableStarter = document.getElementById('table-price-starter');
+  const tableGrowth = document.getElementById('table-price-growth');
+  const tableEnterprise = document.getElementById('table-price-enterprise');
+
+  if (cycle === 'annual') {
+    if (starterAmount) starterAmount.textContent = 'HK$3,040';
+    if (starterNote) starterNote.textContent = '按年預繳 HK$36,480（已慳 HK$9,120 / 年）';
+    if (setupStarterNote) setupStarterNote.textContent = 'HK$0（已豁免 HK$6,800）';
+    if (growthAmount) growthAmount.textContent = 'HK$7,040';
+    if (growthNote) growthNote.textContent = '按年預繳 HK$84,480（已慳 HK$21,120 / 年）';
+    if (setupGrowthNote) setupGrowthNote.textContent = 'HK$0（已豁免 HK$12,800）';
+    if (enterpriseAmount) enterpriseAmount.textContent = 'HK$15,040';
+    if (enterpriseNote) enterpriseNote.textContent = '按年預繳 HK$180,480（已慳 HK$45,120 / 年）';
+    if (tableStarter) tableStarter.textContent = 'HK$3,040';
+    if (tableGrowth) tableGrowth.textContent = 'HK$7,040';
+    if (tableEnterprise) tableEnterprise.textContent = 'HK$15,040';
+  } else {
+    if (starterAmount) starterAmount.textContent = 'HK$3,800';
+    if (starterNote) starterNote.textContent = '按月結算（按年預繳 HK$3,040 / 月）';
+    if (setupStarterNote) setupStarterNote.textContent = 'HK$6,800';
+    if (growthAmount) growthAmount.textContent = 'HK$8,800';
+    if (growthNote) growthNote.textContent = '按月結算（按年預繳 HK$7,040 / 月）';
+    if (setupGrowthNote) setupGrowthNote.textContent = 'HK$12,800';
+    if (enterpriseAmount) enterpriseAmount.textContent = 'HK$18,800';
+    if (enterpriseNote) enterpriseNote.textContent = '按月結算（按年預繳 HK$15,040 / 月）';
+    if (tableStarter) tableStarter.textContent = 'HK$3,800';
+    if (tableGrowth) tableGrowth.textContent = 'HK$8,800';
+    if (tableEnterprise) tableEnterprise.textContent = 'HK$18,800';
+  }
+}
+
+function toggleDiffOnlyRows(onlyDiff) {
+  const rows = document.querySelectorAll('.comparison-feature-row');
+  let visibleCount = 0;
+  rows.forEach((row) => {
+    const isSame = row.getAttribute('data-same') === 'true';
+    if (onlyDiff && isSame) row.classList.add('hidden');
+    else {
+      row.classList.remove('hidden');
+      visibleCount += 1;
+    }
+  });
+  const counter = document.getElementById('diff-row-counter');
+  if (counter) counter.textContent = onlyDiff ? '差異 ' + visibleCount + ' 項' : '全部 ' + rows.length + ' 項';
+}
+
+function toggleFaqItem(idx) {
+  const body = document.getElementById('faq-body-' + idx);
+  const icon = document.getElementById('faq-icon-' + idx);
+  if (!body) return;
+  const willOpen = body.hasAttribute('hidden');
+  if (willOpen) body.removeAttribute('hidden');
+  else body.setAttribute('hidden', '');
+  if (icon) icon.classList.toggle('is-open', willOpen);
+}
+
+function fieldValue(id) {
+  const el = document.getElementById(id);
+  return el && 'value' in el ? String(el.value).trim() : '';
+}
+
+function markInvalid(id, invalid) {
+  const el = document.getElementById(id);
+  if (el) el.setAttribute('aria-invalid', invalid ? 'true' : 'false');
+}
+
+function handleLeadSubmit(event) {
+  event.preventDefault();
+  const company = fieldValue('company-name');
+  const person = fieldValue('contact-person');
+  const phone = fieldValue('contact-phone');
+  const url = fieldValue('website-url');
+  const phoneDigits = phone.replace(/\\D/g, '');
+  const websiteOk = /^https?:\\/\\/\\S+$/i.test(url) || /^[^\\s]+\\.[^\\s]+$/.test(url);
+  const checks = [
+    ['company-name', company.length > 0],
+    ['contact-person', person.length > 0],
+    ['contact-phone', phoneDigits.length >= 8],
+    ['website-url', websiteOk]
+  ];
+  let valid = true;
+  checks.forEach(([id, ok]) => {
+    markInvalid(id, !ok);
+    if (!ok) valid = false;
+  });
+  const error = document.getElementById('lead-form-error');
+  const success = document.getElementById('lead-form-success');
+  if (!valid) {
+    if (error) {
+      error.hidden = false;
+      error.textContent = '請填寫公司名稱、聯絡人、至少 8 位數字嘅電話，以及有效網站網址。表格尚未送出。';
+    }
+    if (success) success.classList.add('hidden');
+    return;
+  }
+  if (error) error.hidden = true;
+  const form = document.getElementById('lead-form');
+  if (form) form.classList.add('hidden');
+  if (success) success.classList.remove('hidden');
+  const detail = document.getElementById('lead-success-detail');
+  if (detail) {
+    detail.textContent = '已檢查 ' + person + '（' + company + '）同網站 ' + url + ' 嘅格式。這份表格尚未送出，沒有傳送到伺服器，亦未有人收到。';
+  }
+}
+
+function resetLeadForm() {
+  const form = document.getElementById('lead-form');
+  const success = document.getElementById('lead-form-success');
+  if (form) {
+    form.reset();
+    form.classList.remove('hidden');
+  }
+  if (success) success.classList.add('hidden');
+  ['company-name', 'contact-person', 'contact-phone', 'website-url'].forEach((id) => markInvalid(id, false));
+}
+
+window.addEventListener('hashchange', onVoicePilotHashChange);
+
+function initVoicePilotSite() {
+  const initialHash = window.location.hash.replace('#', '');
+  if (VALID_PAGES.includes(initialHash)) navigateToPage(initialHash);
+  else updateNavbarActiveState('home');
+  const diff = document.getElementById('diff-only-checkbox');
+  toggleDiffOnlyRows(Boolean(diff && diff.checked));
+}
+
+window.initVoicePilotSite = initVoicePilotSite;
+window.__voicePilotTeardown = function () {
+  window.removeEventListener('hashchange', onVoicePilotHashChange);
+};
+
+function onVoicePilotHashChange() {
+  const hashPage = window.location.hash.replace('#', '');
+  if (VALID_PAGES.includes(hashPage) && hashPage !== currentActivePage) navigateToPage(hashPage);
+}
+
+initVoicePilotSite();
+`;

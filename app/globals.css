@@ -13,3 +13,9 @@ body {
   color: #0a2540;
   font-family: Inter, "Noto Sans TC", -apple-system, BlinkMacSystemFont, sans-serif;
 }
+
+html.vp-world,
+html.vp-world body {
+  background: #050510;
+  color: #ffffff;
+}
