@@ -25,6 +25,12 @@
       }
       return "Navigated to " + page;
     };
+    tools.calculate_plan_cost = function (params) {
+      if (typeof window.calculatePlanCost === "function") {
+        window.calculatePlanCost(params || {});
+      }
+      return "Calculator updated";
+    };
     config.clientTools = tools;
   });
 
