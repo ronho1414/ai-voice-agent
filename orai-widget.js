@@ -144,16 +144,16 @@
       history.replaceState(null, "", "#" + targetPage);
     }
 
-    window.setTimeout(function () {
-      if (parsed.targetSectionId) {
+    if (parsed.targetSectionId) {
+      window.setTimeout(function () {
         var targetEl = document.getElementById(parsed.targetSectionId);
         if (targetEl && typeof targetEl.scrollIntoView === "function") {
           targetEl.scrollIntoView({ behavior: "smooth", block: "start" });
         }
-      } else {
-        window.scrollTo({ top: 0, behavior: "smooth" });
-      }
-    }, 60);
+      }, 60);
+    } else {
+      window.scrollTo(0, 0);
+    }
 
     window.setTimeout(refreshReveals, 50);
     return targetPage;

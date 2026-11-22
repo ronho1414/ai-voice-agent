@@ -96,24 +96,9 @@ function forceVisible(gsap: Gsap, nodes: Element[]): void {
   gsap.set(nodes, { autoAlpha: 1, overwrite: "auto" });
 }
 
-function slideIn(gsap: Gsap, timeline: Timeline, nodes: Element[], position: number | string, stagger = 0): void {
+function slideIn(gsap: Gsap, _timeline: Timeline, nodes: Element[], _position: number | string, _stagger = 0): void {
   if (!nodes.length) return;
   forceVisible(gsap, nodes);
-  if (reduceMotion) return;
-  timeline.fromTo(
-    nodes,
-    { y: 20 },
-    {
-      y: 0,
-      duration: 0.55,
-      stagger,
-      ease: "power3.out",
-      overwrite: "auto",
-      immediateRender: true,
-      clearProps: "transform",
-    },
-    position,
-  );
 }
 
 function sectionCards(section: HTMLElement): HTMLElement[] {
@@ -171,15 +156,7 @@ function revealHero(gsap: Gsap, section: HTMLElement): void {
     (node): node is Element => node instanceof Element,
   );
   forceVisible(gsap, nodes);
-  if (card) playHeroChat(gsap, card);
-  if (reduceMotion) return;
-  const timeline = gsap.timeline({ defaults: { ease: "power3.out" } });
-  if (card) slideIn(gsap, timeline, [card], 0);
-  if (eyebrow) slideIn(gsap, timeline, [eyebrow], "-=0.3");
-  if (title) slideIn(gsap, timeline, [title], "-=0.35");
-  if (lede) slideIn(gsap, timeline, [lede], "-=0.35");
-  if (ctas.length) slideIn(gsap, timeline, ctas, "-=0.3", 0.06);
-  if (stats.length) slideIn(gsap, timeline, stats, "-=0.25", 0.05);
+  finishHeroChat(gsap);
 }
 
 function revealSection(gsap: Gsap, section: HTMLElement): void {
@@ -193,10 +170,6 @@ function revealSection(gsap: Gsap, section: HTMLElement): void {
   const title = section.querySelector("h1, h2");
   const items = sectionCards(section);
   forceVisible(gsap, [...(title ? [title] : []), ...items]);
-  if (reduceMotion) return;
-  const timeline = gsap.timeline({ defaults: { ease: "power3.out" } });
-  if (title) slideIn(gsap, timeline, [title], 0);
-  if (items.length) slideIn(gsap, timeline, items, title ? "-=0.35" : 0, 0.06);
 }
 
 function sectionInView(section: HTMLElement): boolean {
@@ -213,11 +186,10 @@ function revealInView(gsap: Gsap, page: HTMLElement | null): void {
 
 function replayPage(gsap: Gsap, page: HTMLElement | null): void {
   if (!page) return;
+  finishHeroChat(gsap);
   page.querySelectorAll("section").forEach((section) => {
-    if (section instanceof HTMLElement) section.dataset.motionPlayed = "0";
+    if (section instanceof HTMLElement) section.dataset.motionPlayed = "1";
   });
-  revealInView(gsap, page);
-  window.requestAnimationFrame(() => revealInView(gsap, page));
 }
 
 function ensureObserver(gsap: Gsap): void {
@@ -404,22 +376,26 @@ function wrapNavigate(gsap: Gsap): void {
   const original = window.navigateToPage as Wrapped | undefined;
   if (!original || original.__oraiWrapped) return;
   const wrapped: Wrapped = function (this: unknown, ...args: never[]) {
-    const indicator = document.getElementById("nav-active-indicator");
-    const fromX = indicator ? indicatorX(gsap, indicator) : 0;
-    const previous = activePage()?.id ?? "";
     const result = original.apply(this, args);
     const nextId = typeof result === "string" ? result : "home";
     const nextPage = document.getElementById(`page-${nextId}`);
-    if (indicator && !reduceMotion) {
-      const toX = indicatorX(gsap, indicator);
-      if (fromX !== toX) {
-        gsap.fromTo(indicator, { x: fromX }, { x: toX, duration: 0.45, ease: "power3.out", overwrite: "auto" });
+
+    // Instant, crisp page transition without any fade, slide-up, translate-y or opacity delays
+    heroChatTimeline?.kill();
+    heroChatTimeline = null;
+    finishHeroChat(gsap);
+
+    document.querySelectorAll("section").forEach((section) => {
+      if (section instanceof HTMLElement) {
+        section.dataset.motionPlayed = "1";
       }
+    });
+
+    if (nextPage) {
+      const animatedNodes = nextPage.querySelectorAll("*");
+      gsap.set(animatedNodes, { clearProps: "transform,opacity,visibility", overwrite: "auto" });
     }
-    if (nextPage && previous !== nextPage.id) replayPage(gsap, nextPage);
-    window.setTimeout(() => {
-      if (nextPage && !nextPage.classList.contains("page-view-hidden")) revealInView(gsap, nextPage);
-    }, 90);
+
     return result;
   };
   wrapped.__oraiWrapped = true;
@@ -552,14 +528,8 @@ function bindDom(gsap: Gsap): void {
   if (header instanceof HTMLElement && header.dataset.motionPlayed !== "1") {
     header.dataset.motionPlayed = "1";
     forceVisible(gsap, [header]);
-    if (!reduceMotion) {
-      gsap.fromTo(
-        header,
-        { y: -16 },
-        { y: 0, duration: 0.55, ease: "power2.out", clearProps: "transform", overwrite: "auto" },
-      );
-    }
   }
+  finishHeroChat(gsap);
   revealInView(gsap, activePage());
 }
 

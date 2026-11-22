@@ -8,8 +8,13 @@
   --font-sans: Inter, "Noto Sans TC", -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   background: #ffffff;
   color: #09090b;
   font-family: Inter, "Noto Sans TC", -apple-system, BlinkMacSystemFont, sans-serif;
+  min-height: 100vh;
 }
