@@ -132,15 +132,15 @@ function playHeroChat(gsap: Gsap, card: Element): void {
     finishHeroChat(gsap);
     return;
   }
-  gsap.set(steps, { autoAlpha: 0, y: 18, scale: 0.98 });
+  gsap.set(steps, { autoAlpha: 0, y: 14, scale: 0.98 });
   card.classList.add("hero-chat-ready");
   const timeline = gsap.timeline();
   heroChatTimeline = timeline;
   steps.forEach((step, index) => {
     timeline.to(
       step,
-      { autoAlpha: 1, y: 0, scale: 1, duration: 0.45, ease: "power2.out" },
-      index === 0 ? 0.2 : "+=0.45",
+      { autoAlpha: 1, y: 0, scale: 1, duration: 0.35, ease: "power2.out" },
+      index === 0 ? 0.2 : "+=0.35",
     );
   });
 }
@@ -156,7 +156,7 @@ function revealHero(gsap: Gsap, section: HTMLElement): void {
     (node): node is Element => node instanceof Element,
   );
   forceVisible(gsap, nodes);
-  finishHeroChat(gsap);
+  if (card) playHeroChat(gsap, card);
 }
 
 function revealSection(gsap: Gsap, section: HTMLElement): void {
@@ -394,6 +394,11 @@ function wrapNavigate(gsap: Gsap): void {
     if (nextPage) {
       const animatedNodes = nextPage.querySelectorAll("*");
       gsap.set(animatedNodes, { clearProps: "transform,opacity,visibility", overwrite: "auto" });
+
+      if (nextId === "home") {
+        const heroCard = nextPage.querySelector(".hero-chat-card");
+        if (heroCard) playHeroChat(gsap, heroCard);
+      }
     }
 
     return result;
@@ -529,7 +534,9 @@ function bindDom(gsap: Gsap): void {
     header.dataset.motionPlayed = "1";
     forceVisible(gsap, [header]);
   }
-  finishHeroChat(gsap);
+  const heroCard = document.querySelector(".hero-chat-card");
+  if (heroCard) playHeroChat(gsap, heroCard);
+  else finishHeroChat(gsap);
   revealInView(gsap, activePage());
 }
 

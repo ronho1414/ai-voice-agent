@@ -80,8 +80,10 @@ html {
       box-shadow: 0 24px 60px -15px rgba(15, 23, 42, 0.1);
     }
 
-    .hero-chat-card [data-hero-step] {
-      opacity: 1;
+    @media (prefers-reduced-motion: no-preference) {
+      .hero-chat-card:not(.hero-chat-ready) [data-hero-step] {
+        opacity: 0;
+      }
     }
 
     .pricing-ice-glow {
