@@ -406,7 +406,7 @@ export function AdminConsole() {
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8 sm:px-6">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold text-[#635BFF]">VoicePilot AI</p>
+            <p className="text-sm font-semibold text-[#09090B]">Orai Service</p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight">企業管理員後台</h1>
             <p className="mt-2 max-w-2xl text-sm text-[#425466]">
               管理知識庫檔案同手打備註，同埋睇訪客對話。語音開場白唔會等資料庫寫完先至出聲。

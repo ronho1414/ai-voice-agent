@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { AdminConsole } from "@/components/admin/AdminConsole";
+import { OraiAdminDashboard } from "@/components/admin/OraiAdminDashboard";
 
 export const metadata: Metadata = {
-  title: "VoicePilot 管理後台",
-  description: "管理企業知識庫 PDF 同訪客對話紀錄。",
+  title: "Orai Service 企業管理總後台",
+  description: "管理香港本地企業商戶、語音專員配置及全平台用量。",
 };
 
 export default function AdminPage() {
-  return <AdminConsole />;
+  return <OraiAdminDashboard />;
 }
