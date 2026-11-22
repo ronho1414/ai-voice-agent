@@ -13,6 +13,7 @@ type Wrapped = ((...args: never[]) => unknown) & { __oraiWrapped?: boolean };
 declare global {
   interface Window {
     handleLeadSubmit?: (event: Event) => void;
+    handleVoiceDemoTrigger?: () => void;
     resetLeadForm?: () => void;
     activateFeatureAccordion?: (index: number) => void;
     selectIndustryShowcase?: (index: number) => void;
@@ -32,6 +33,7 @@ let reduceMotion = false;
 let observer: IntersectionObserver | null = null;
 let leadTimeline: Timeline | null = null;
 let spinTween: Tween | null = null;
+let callTimer = 0;
 
 function activePage(): HTMLElement | null {
   const page = document.querySelector(".page-view-active");
@@ -85,52 +87,78 @@ function syncOrbs(gsap: Gsap): void {
   });
 }
 
-function revealHero(gsap: Gsap, section: HTMLElement): void {
-  const card = section.querySelector(".hero-chat-card");
-  const bubbles = section.querySelectorAll(".hero-chat-card .space-y-3 > div");
-  const title = section.querySelector("h1");
-  const eyebrow = title?.previousElementSibling ?? null;
-  const lede = title?.nextElementSibling ?? null;
-  const ctas = section.querySelectorAll(".mt-8 > button");
-  const stats = section.querySelectorAll(".grid-cols-3 > div");
-  const timeline = gsap.timeline({ defaults: { ease: "power3.out" } });
-
-  if (card) timeline.from(card, { y: 36, autoAlpha: 0, duration: 0.85 });
-  if (bubbles.length) {
-    timeline.from(bubbles, { y: 16, autoAlpha: 0, stagger: 0.1, duration: 0.45 }, "-=0.5");
-  }
-  if (eyebrow) timeline.from(eyebrow, { y: 12, autoAlpha: 0, duration: 0.4 }, "-=0.25");
-  if (title) timeline.from(title, { y: 24, autoAlpha: 0, duration: 0.7 }, "-=0.3");
-  if (lede) timeline.from(lede, { y: 16, autoAlpha: 0, duration: 0.5 }, "-=0.45");
-  if (ctas.length) timeline.from(ctas, { y: 14, autoAlpha: 0, stagger: 0.08, duration: 0.45 }, "-=0.35");
-  if (stats.length) timeline.from(stats, { y: 12, autoAlpha: 0, stagger: 0.06, duration: 0.4 }, "-=0.3");
+function forceVisible(gsap: Gsap, nodes: Element[]): void {
+  if (!nodes.length) return;
+  gsap.set(nodes, { autoAlpha: 1, overwrite: "auto" });
 }
 
-function revealSection(gsap: Gsap, section: HTMLElement): void {
-  if (section.dataset.motionPlayed === "1") return;
-  section.dataset.motionPlayed = "1";
+function slideIn(gsap: Gsap, timeline: Timeline, nodes: Element[], position: number | string, stagger = 0): void {
+  if (!nodes.length) return;
+  forceVisible(gsap, nodes);
   if (reduceMotion) return;
-  if (section.id === "hero") {
-    revealHero(gsap, section);
-    return;
-  }
+  timeline.fromTo(
+    nodes,
+    { y: 20 },
+    {
+      y: 0,
+      duration: 0.55,
+      stagger,
+      ease: "power3.out",
+      overwrite: "auto",
+      immediateRender: true,
+      clearProps: "transform",
+    },
+    position,
+  );
+}
 
-  const timeline = gsap.timeline({ defaults: { ease: "power3.out" } });
-  const title = section.querySelector("h1, h2");
-  if (title) timeline.from(title, { y: 22, autoAlpha: 0, duration: 0.65, clearProps: "transform" });
-
+function sectionCards(section: HTMLElement): HTMLElement[] {
   const accordion = [...section.querySelectorAll<HTMLElement>("#feature-accordion-group > *")];
   const steps = [...section.querySelectorAll<HTMLElement>("ol > li")];
   const cards = [...section.querySelectorAll<HTMLElement>(".grid > *")].filter((node) =>
     /rounded-|border|shadow-stripe/.test(node.className),
   );
-  const items = [...new Set([...accordion, ...steps, ...cards])].slice(0, 12);
-  if (!items.length) return;
-  timeline.from(
-    items,
-    { y: 22, autoAlpha: 0, stagger: 0.07, duration: 0.55, clearProps: "transform" },
-    title ? "-=0.35" : 0,
+  return [...new Set([...accordion, ...steps, ...cards])].slice(0, 12);
+}
+
+function revealHero(gsap: Gsap, section: HTMLElement): void {
+  const card = section.querySelector(".hero-chat-card");
+  const bubbles = [...section.querySelectorAll(".hero-chat-card .space-y-3 > div")];
+  const title = section.querySelector("h1");
+  const eyebrow = title?.previousElementSibling ?? null;
+  const lede = title?.nextElementSibling ?? null;
+  const ctas = [...section.querySelectorAll(".mt-8 > button")];
+  const stats = [...section.querySelectorAll(".grid-cols-3 > div")];
+  const nodes = [card, eyebrow, title, lede, ...bubbles, ...ctas, ...stats].filter(
+    (node): node is Element => node instanceof Element,
   );
+  forceVisible(gsap, nodes);
+  if (reduceMotion) return;
+  const timeline = gsap.timeline({ defaults: { ease: "power3.out" } });
+  if (card) slideIn(gsap, timeline, [card], 0);
+  if (bubbles.length) slideIn(gsap, timeline, bubbles, "-=0.4", 0.08);
+  if (eyebrow) slideIn(gsap, timeline, [eyebrow], "-=0.3");
+  if (title) slideIn(gsap, timeline, [title], "-=0.35");
+  if (lede) slideIn(gsap, timeline, [lede], "-=0.35");
+  if (ctas.length) slideIn(gsap, timeline, ctas, "-=0.3", 0.06);
+  if (stats.length) slideIn(gsap, timeline, stats, "-=0.25", 0.05);
+}
+
+function revealSection(gsap: Gsap, section: HTMLElement): void {
+  if (section.dataset.motionPlayed === "1") return;
+  section.dataset.motionPlayed = "1";
+  if (section.id === "hero") {
+    revealHero(gsap, section);
+    return;
+  }
+
+  const title = section.querySelector("h1, h2");
+  const items = sectionCards(section);
+  forceVisible(gsap, [...(title ? [title] : []), ...items]);
+  if (reduceMotion) return;
+  const timeline = gsap.timeline({ defaults: { ease: "power3.out" } });
+  if (title) slideIn(gsap, timeline, [title], 0);
+  if (items.length) slideIn(gsap, timeline, items, title ? "-=0.35" : 0, 0.06);
 }
 
 function sectionInView(section: HTMLElement): boolean {
@@ -377,6 +405,7 @@ function wrapNamed<T extends (...args: never[]) => unknown>(
 }
 
 function wrapInteractions(gsap: Gsap): void {
+  wrapVoiceTrigger();
   wrapNavigate(gsap);
   wrapNamed(
     () => window.activateFeatureAccordion,
@@ -445,6 +474,35 @@ function wrapInteractions(gsap: Gsap): void {
   );
 }
 
+function clickStartCall(): boolean {
+  const widget = document.querySelector("elevenlabs-convai");
+  const button = widget?.shadowRoot?.querySelector('button[aria-label="Start a call"]');
+  if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+  button.click();
+  return true;
+}
+
+function startOraiCall(): void {
+  window.clearTimeout(callTimer);
+  const attempt = (tries: number) => {
+    if (clickStartCall() || tries >= 24) return;
+    callTimer = window.setTimeout(() => attempt(tries + 1), 150);
+  };
+  attempt(0);
+}
+
+function wrapVoiceTrigger(): void {
+  const original = window.handleVoiceDemoTrigger as Wrapped | undefined;
+  if (!original || original.__oraiWrapped) return;
+  const wrapped: Wrapped = function (this: unknown, ...args: never[]) {
+    const result = original.apply(this, args);
+    startOraiCall();
+    return result;
+  };
+  wrapped.__oraiWrapped = true;
+  window.handleVoiceDemoTrigger = wrapped as Window["handleVoiceDemoTrigger"];
+}
+
 function bindDom(gsap: Gsap): void {
   reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   markDemoButtons();
@@ -455,8 +513,13 @@ function bindDom(gsap: Gsap): void {
   const header = document.querySelector("header");
   if (header instanceof HTMLElement && header.dataset.motionPlayed !== "1") {
     header.dataset.motionPlayed = "1";
+    forceVisible(gsap, [header]);
     if (!reduceMotion) {
-      gsap.from(header, { y: -16, autoAlpha: 0, duration: 0.55, ease: "power2.out", clearProps: "transform" });
+      gsap.fromTo(
+        header,
+        { y: -16 },
+        { y: 0, duration: 0.55, ease: "power2.out", clearProps: "transform", overwrite: "auto" },
+      );
     }
   }
   revealInView(gsap, activePage());
@@ -502,7 +565,10 @@ export function bootSiteMotion(gsap: Gsap): void {
   wrapInteractions(gsap);
   bindDocument(gsap);
   bindDom(gsap);
-  if (typeof window.navigateToPage !== "function") {
-    window.setTimeout(() => wrapNavigate(gsap), 50);
+  if (typeof window.navigateToPage !== "function" || typeof window.handleVoiceDemoTrigger !== "function") {
+    window.setTimeout(() => {
+      wrapVoiceTrigger();
+      wrapNavigate(gsap);
+    }, 50);
   }
 }
