@@ -5,9 +5,9 @@
       "url": "home",
       "name": "首頁",
       "keywords": {
-        "yue": ["主頁", "首頁", "返去主頁", "開頭"],
-        "zh": ["主页", "首页", "回到首页"],
-        "en": ["home", "homepage", "main page"]
+        "yue": ["主頁", "首頁", "返去主頁", "開頭", "預約", "Demo", "聯絡", "留低資料"],
+        "zh": ["主页", "首页", "回到首页", "预约", "演示", "联系"],
+        "en": ["home", "homepage", "main page", "demo", "contact", "book"]
       }
     },
     {
@@ -32,9 +32,9 @@
       "url": "about",
       "name": "關於我們",
       "keywords": {
-        "yue": ["關於", "團隊", "預約", "Demo", "聯絡", "留低資料"],
-        "zh": ["关于", "团队", "预约", "演示", "联系"],
-        "en": ["about", "team", "demo", "contact", "book"]
+        "yue": ["關於", "團隊"],
+        "zh": ["关于", "团队"],
+        "en": ["about", "team"]
       }
     }
   ]

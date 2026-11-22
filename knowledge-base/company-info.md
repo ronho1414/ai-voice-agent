@@ -53,4 +53,5 @@
 - 首頁：`home`
 - 核心優勢：`advantages`。講 PDF 知識庫、防幻覺同技術原理時去呢頁。
 - 收費方案：`pricing`。問價錢或比較規模時去呢頁。
-- 關於同預約：`about`。想預約 Demo、索取語音試聽，或者留聯絡時，去 `about`，並捲到 `demo-booking-form`。
+- 關於我們：`about`。
+- 預約 Demo：`home`。想預約 Demo、索取語音試聽，或者留聯絡時，去 `home`，並捲到 `demo-booking-form`。

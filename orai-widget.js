@@ -104,8 +104,11 @@
   }
 
   window.navigateToPage = function (pageId, options) {
-    var targetPage = VALID_PAGES.indexOf(pageId) !== -1 ? pageId : "home";
     var parsed = readOptions(options);
+    var targetPage = VALID_PAGES.indexOf(pageId) !== -1 ? pageId : "home";
+    if (parsed.targetSectionId === "demo-booking-form" || parsed.targetSectionId === "contact-form") {
+      targetPage = "home";
+    }
 
     VALID_PAGES.forEach(function (id) {
       var el = document.getElementById("page-" + id);
@@ -326,7 +329,7 @@
     var website = textValue(firstValue(input, ["website", "websiteUrl", "url", "website_url"]));
     var sample = flag(input.requestVoiceSample != null ? input.requestVoiceSample : input.voiceSample);
     var tokens = addonTokens(input);
-    window.navigateToPage("about", { sectionId: "demo-booking-form" });
+    window.navigateToPage("home", { sectionId: "demo-booking-form" });
     showLeadForm();
     return wait(90).then(function () {
       var chain = Promise.resolve();

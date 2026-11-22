@@ -67,7 +67,7 @@ const FORCED_PAGE: Partial<Record<Intent, { url: string; sectionId?: string }>> 
   price_objection: { url: "pricing" },
   ask_voice_clone: { url: "pricing" },
   navigate_advantages: { url: "advantages" },
-  booking_demo: { url: "about", sectionId: "demo-booking-form" },
+  booking_demo: { url: "home", sectionId: "demo-booking-form" },
 };
 
 const DEFAULT_CONTEXT: TurnContext = { currentPage: "home", turnCount: 1 };

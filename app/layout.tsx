@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { VoiceWidgetRoot } from "@/components/voice-widget/VoiceWidgetRoot";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -26,7 +25,6 @@ export default function RootLayout({
       </head>
       <body>
         {children}
-        <VoiceWidgetRoot />
         <script src="/orai-widget.js" data-agent-id="agent_8201m7sbetj3e36s1a2nv3fgcqna" defer />
       </body>
     </html>
