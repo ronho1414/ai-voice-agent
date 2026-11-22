@@ -27,6 +27,7 @@ export default function RootLayout({
       <body>
         {children}
         <VoiceWidgetRoot />
+        <script src="/orai-widget.js" data-agent-id="agent_8201m7sbetj3e36s1a2nv3fgcqna" defer />
       </body>
     </html>
   );
