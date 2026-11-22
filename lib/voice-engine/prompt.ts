@@ -7,9 +7,9 @@ const LANGUAGE_RULE: Record<Lang, string> = {
 };
 
 const PRICE_REPLY: Record<Lang, string> = {
-  yue: "呢個價錢我份資料冇寫，我會幫你記錄低，再由團隊跟進。收費方案頁有 Starter、Growth 同 Enterprise。",
-  zh: "这个价格我的资料里没有，我会记下，再由团队跟进。收费方案页有 Starter、Growth 和 Enterprise。",
-  en: "That price is not in my notes. I'll record it and have the team follow up. The pricing page lists Starter, Growth, and Enterprise.",
+  yue: "呢個價錢我份資料冇寫，我會幫你記錄低，再由團隊跟進。核心基礎部署方案係 HK$8,000 起，每月按實際通話流量計。",
+  zh: "这个价格我的资料里没有，我会记下，再由团队跟进。核心基础部署方案是 HK$8,000 起，每月按实际通话流量计。",
+  en: "That price is not in my notes. I'll record it and have the team follow up. The core plan starts at HK$8,000, then monthly traffic is billed by the minute.",
 };
 
 const UNKNOWN_REPLY: Record<Lang, string> = {
