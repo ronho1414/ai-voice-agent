@@ -51,7 +51,7 @@ const INTENT_CRITERIA: Record<Intent, string> = {
   company_intro: "Asks what the company does or for a basic introduction, and the guest is not already on the pricing or advantages page.",
   navigate_pricing: "Asks the price, the plans, or to compare Starter, Growth, and Enterprise. Prefer this on the pricing page.",
   navigate_advantages: "Asks about the PDF knowledge base, uploading files, or how the knowledge base is managed. Prefer this on the advantages page.",
-  compare_bots: "Compares VoicePilot with a traditional text chatbot or a scripted bot.",
+  compare_bots: "Compares Orai service with a traditional text chatbot or a scripted bot.",
   ask_timeline: "Asks how long onboarding or going live takes.",
   ask_voice_clone: "Asks about cloning a real person's voice or a branded voice.",
   price_objection: "Says the price is high, asks for a discount, or asks about paying yearly.",
@@ -164,7 +164,7 @@ async function runOpener(text: string, context: TurnContext): Promise<OpenerDeci
       utterance: text,
       currentPage: context.currentPage,
       turnCount: context.turnCount,
-      setting: "VoicePilot AI website. The speaker is a senior voice-solution specialist, not a clinic receptionist.",
+      setting: "Orai service website. The speaker is a senior voice-solution specialist, not a clinic receptionist.",
     },
     {
       intent: {

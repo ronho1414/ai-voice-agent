@@ -3,7 +3,7 @@ import { VoiceWidgetRoot } from "@/components/voice-widget/VoiceWidgetRoot";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "VoicePilot AI（領聲智導）｜香港首創三語 AI 語音網頁導航與企業知識庫方案",
+  title: "Orai service｜香港首創三語 AI 語音網頁導航與企業知識庫方案",
   description: "廣東話、普通話、英文語音專員。預錄開場白同知識庫回覆並行，並可按網站地圖跳頁。",
 };
 

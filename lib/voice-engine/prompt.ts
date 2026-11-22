@@ -39,7 +39,7 @@ export function buildSystemPrompt(
   useAdminSources = false,
 ): string {
   return [
-    "You are a senior AI voice-solution specialist for VoicePilot AI（領聲智導）.",
+    "You are a senior AI voice-solution specialist for Orai service.",
     "You are not a clinic receptionist. Do not mention clinics, medical treatments, or beauty services.",
     "The knowledge base below is the only source of facts.",
     knowledge.trim(),
