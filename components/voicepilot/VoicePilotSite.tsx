@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import gsap from "gsap";
 import { VOICEPILOT_MARKUP } from "@/components/voicepilot/markup";
+import { bootSiteMotion } from "@/components/voicepilot/site-motion";
 import { VOICEPILOT_SCRIPT } from "@/components/voicepilot/site-script";
 
 declare global {
@@ -32,8 +33,10 @@ export function VoicePilotSite() {
       script.text = VOICEPILOT_SCRIPT;
       document.body.appendChild(script);
       window.__voicePilotBooted = true;
+      bootSiteMotion(gsap);
     } else {
       window.initVoicePilotSite?.();
+      bootSiteMotion(gsap);
     }
     openRequestedPage();
 
