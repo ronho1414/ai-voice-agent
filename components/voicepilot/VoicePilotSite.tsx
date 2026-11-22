@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import gsap from "gsap";
 import { VOICEPILOT_MARKUP } from "@/components/voicepilot/markup";
 import { VOICEPILOT_SCRIPT } from "@/components/voicepilot/site-script";
 
@@ -10,6 +11,7 @@ declare global {
     initVoicePilotSite?: () => void;
     lucide?: { createIcons: () => void };
     __voicePilotBooted?: boolean;
+    gsap?: typeof gsap;
   }
 }
 
@@ -23,6 +25,7 @@ function openRequestedPage(): void {
 
 export function VoicePilotSite() {
   useEffect(() => {
+    window.gsap = gsap;
     if (!window.__voicePilotBooted) {
       const script = document.createElement("script");
       script.dataset.voicepilot = "site";
@@ -63,7 +66,7 @@ export function VoicePilotSite() {
 
   return (
     <div
-      className="bg-white text-[#0A2540] antialiased selection:bg-[#635BFF]/15 selection:text-[#635BFF]"
+      className="bg-white text-[#09090B] antialiased selection:bg-[#09090B]/10 selection:text-[#09090B]"
       dangerouslySetInnerHTML={{ __html: VOICEPILOT_MARKUP }}
     />
   );

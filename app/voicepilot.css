@@ -78,3 +78,83 @@
       opacity: 1;
       transform: translateY(0);
     }
+
+    .hero-sky {
+      background: radial-gradient(ellipse 85% 55% at 50% 0%, #dbeafe 0%, #eff6ff 42%, #ffffff 85%);
+    }
+
+    .hero-chat-card {
+      box-shadow: 0 24px 60px -15px rgba(15, 23, 42, 0.1);
+    }
+
+    .pricing-ice-glow {
+      background: radial-gradient(ellipse 80% 100% at 50% 0%, rgba(219, 234, 254, 0.9) 0%, rgba(255, 255, 255, 0) 72%);
+    }
+
+    .hero-orb {
+      background:
+        radial-gradient(circle at 32% 30%, #ffffff 0%, rgba(255, 255, 255, 0) 28%),
+        conic-gradient(from 200deg, #7dd3fc, #38bdf8, #22d3ee, #67e8f9, #38bdf8, #0ea5e9, #7dd3fc);
+      box-shadow: 0 0 0 4px rgba(186, 230, 253, 0.45);
+      animation: heroOrbSpin 10s linear infinite;
+    }
+
+    @keyframes heroOrbSpin {
+      to { transform: rotate(360deg); }
+    }
+
+    #lead-form input[aria-invalid="true"] {
+      border-color: #09090b;
+      box-shadow: 0 0 0 1px #09090b;
+    }
+
+    #calc-minutes-slider {
+      accent-color: #09090b;
+    }
+
+    /* orai-widget.js still toggles the previous accent class names. Paint them in obsidian. */
+    .text-\[\#635BFF\] {
+      color: #09090b;
+    }
+
+    .bg-\[\#635BFF\] {
+      background-color: #09090b;
+    }
+
+    .border-\[\#635BFF\] {
+      border-color: #09090b;
+    }
+
+    .ring-\[\#635BFF\] {
+      --tw-ring-color: #09090b;
+    }
+
+    .text-\[\#425466\] {
+      color: #52525b;
+    }
+
+    .hover\:text-\[\#635BFF\]:hover {
+      color: #09090b;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .voice-wave-bar,
+      .analytics-bar,
+      .page-view-active,
+      .reveal-on-scroll,
+      .accordion-photo-card,
+      .accordion-photo-img,
+      .hero-orb {
+        animation: none !important;
+        transition: none !important;
+      }
+
+      .reveal-on-scroll {
+        opacity: 1;
+        transform: none;
+      }
+
+      .hero-orb {
+        transform: none;
+      }
+    }
