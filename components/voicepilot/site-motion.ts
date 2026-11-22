@@ -50,7 +50,10 @@ function indicatorX(gsap: Gsap, indicator: HTMLElement): number {
 function markDemoButtons(): void {
   document.querySelectorAll("button").forEach((button) => {
     const text = (button.textContent ?? "").replace(/\s+/g, "");
-    const isDemo = text.includes("預約免費Demo") || text.includes("預約免費15分鐘專屬Demo");
+    const isDemo =
+      text.includes("預約免費Demo") ||
+      text.includes("預約免費15分鐘專屬Demo") ||
+      text.includes("預約15分鐘專屬Demo");
     if (!isDemo || button.dataset.demoRipple === "true") return;
     button.dataset.demoRipple = "true";
     button.classList.add("relative", "overflow-hidden");
