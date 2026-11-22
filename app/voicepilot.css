@@ -75,6 +75,12 @@
       box-shadow: 0 24px 60px -15px rgba(15, 23, 42, 0.1);
     }
 
+    @media (prefers-reduced-motion: no-preference) {
+      .hero-chat-card:not(.hero-chat-ready) [data-hero-step] {
+        opacity: 0;
+      }
+    }
+
     .pricing-ice-glow {
       background: radial-gradient(ellipse 80% 100% at 50% 0%, rgba(219, 234, 254, 0.9) 0%, rgba(255, 255, 255, 0) 72%);
     }

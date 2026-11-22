@@ -34,6 +34,7 @@ let observer: IntersectionObserver | null = null;
 let leadTimeline: Timeline | null = null;
 let spinTween: Tween | null = null;
 let callTimer = 0;
+let heroChatTimeline: Timeline | null = null;
 
 function activePage(): HTMLElement | null {
   const page = document.querySelector(".page-view-active");
@@ -124,22 +125,56 @@ function sectionCards(section: HTMLElement): HTMLElement[] {
   return [...new Set([...accordion, ...steps, ...cards])].slice(0, 12);
 }
 
+function heroSteps(card: Element): HTMLElement[] {
+  return [...card.querySelectorAll<HTMLElement>("[data-hero-step]")];
+}
+
+function finishHeroChat(gsap: Gsap): void {
+  heroChatTimeline?.kill();
+  heroChatTimeline = null;
+  document.querySelectorAll(".hero-chat-card").forEach((card) => {
+    card.classList.add("hero-chat-ready");
+    const steps = heroSteps(card);
+    if (steps.length) gsap.set(steps, { autoAlpha: 1, y: 0, scale: 1, overwrite: "auto" });
+  });
+}
+
+function playHeroChat(gsap: Gsap, card: Element): void {
+  const steps = heroSteps(card);
+  heroChatTimeline?.kill();
+  heroChatTimeline = null;
+  if (!steps.length || reduceMotion) {
+    finishHeroChat(gsap);
+    return;
+  }
+  gsap.set(steps, { autoAlpha: 0, y: 18, scale: 0.98 });
+  card.classList.add("hero-chat-ready");
+  const timeline = gsap.timeline();
+  heroChatTimeline = timeline;
+  steps.forEach((step, index) => {
+    timeline.to(
+      step,
+      { autoAlpha: 1, y: 0, scale: 1, duration: 0.45, ease: "power2.out" },
+      index === 0 ? 0.2 : "+=0.45",
+    );
+  });
+}
+
 function revealHero(gsap: Gsap, section: HTMLElement): void {
   const card = section.querySelector(".hero-chat-card");
-  const bubbles = [...section.querySelectorAll(".hero-chat-card .space-y-3 > div")];
   const title = section.querySelector("h1");
   const eyebrow = title?.previousElementSibling ?? null;
   const lede = title?.nextElementSibling ?? null;
   const ctas = [...section.querySelectorAll(".mt-8 > button")];
   const stats = [...section.querySelectorAll(".grid-cols-3 > div")];
-  const nodes = [card, eyebrow, title, lede, ...bubbles, ...ctas, ...stats].filter(
+  const nodes = [card, eyebrow, title, lede, ...ctas, ...stats].filter(
     (node): node is Element => node instanceof Element,
   );
   forceVisible(gsap, nodes);
+  if (card) playHeroChat(gsap, card);
   if (reduceMotion) return;
   const timeline = gsap.timeline({ defaults: { ease: "power3.out" } });
   if (card) slideIn(gsap, timeline, [card], 0);
-  if (bubbles.length) slideIn(gsap, timeline, bubbles, "-=0.4", 0.08);
   if (eyebrow) slideIn(gsap, timeline, [eyebrow], "-=0.3");
   if (title) slideIn(gsap, timeline, [title], "-=0.35");
   if (lede) slideIn(gsap, timeline, [lede], "-=0.35");
@@ -556,6 +591,7 @@ function bindDocument(gsap: Gsap): void {
     (context) => {
       reduceMotion = Boolean((context as MotionContext).conditions?.reduceMotion);
       syncOrbs(gsap);
+      if (reduceMotion) finishHeroChat(gsap);
       return () => {
         gsap.killTweensOf(".hero-orb");
       };
