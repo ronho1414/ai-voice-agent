@@ -83,7 +83,10 @@ let writeQueue: Promise<void> = Promise.resolve();
 function supabaseAdmin(): SupabaseClient | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!url || !key) return null;
+  if (!url || !key) {
+    assertLocalAllowed();
+    return null;
+  }
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -120,6 +123,7 @@ async function hydrate(): Promise<void> {
 }
 
 async function readLocal(): Promise<LocalStore> {
+  assertLocalAllowed();
   return enqueue(async () => {
     await hydrate();
     return {
@@ -132,6 +136,7 @@ async function readLocal(): Promise<LocalStore> {
 }
 
 async function changeLocal(change: (store: LocalStore) => LocalStore): Promise<void> {
+  assertLocalAllowed();
   await enqueue(async () => {
     await hydrate();
     memory = change(memory);
@@ -143,6 +148,12 @@ async function changeLocal(change: (store: LocalStore) => LocalStore): Promise<v
       // The disk may be read-only. The in-memory copy still serves this process.
     }
   });
+}
+
+function assertLocalAllowed(): void {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Production requires a working database; local fallback is disabled");
+  }
 }
 
 function summarize(document: DocumentRecord): DocumentSummary {

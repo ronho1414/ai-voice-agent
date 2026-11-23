@@ -22,6 +22,15 @@ npm run typecheck
 
 ## Platform authentication and tenant isolation
 
+Sprint 1.1 data-integrity guards cover both legacy and platform stores: a
+production database configuration/query failure cannot fall back to local JSON
+or memory, a failed write cannot report local success, and failed conversation
+statistics cannot return a fabricated zero. Dashboards surface failed data
+requests and show a dash before overview data is available. This does not turn
+manually inserted test rows in a database into real business activity: keep
+`test-org` and other fictional fixtures in the designated test project, and use
+a separate clean production database when launching real merchants.
+
 Both `/admin` and `/dashboard` now require a Supabase Auth email and password.
 The former merchant-slug login, shared `ADMIN_PASSWORD`, `vp_admin` cookie,
 and signed `orai_auth_session` cookie are not accepted. Existing users must log

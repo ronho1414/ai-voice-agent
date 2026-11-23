@@ -47,6 +47,7 @@ const EMPTY_STORE: PlatformDataStore = {
 };
 
 async function loadLocalStore(): Promise<PlatformDataStore> {
+  if (process.env.NODE_ENV === "production") throw new Error("Production local fallback is disabled");
   if (memoryCache) return memoryCache;
   try {
     const raw = await readFile(storePath(), "utf8");
@@ -503,7 +504,7 @@ export async function countAllConversations(): Promise<number> {
     const { count, error } = await sb
       .from("conversations")
       .select("*", { count: "exact", head: true });
-    if (error) return 0;
+    if (error) throw new Error("Conversation statistics are unavailable");
     return count ?? 0;
   }
   const store = await loadLocalStore();

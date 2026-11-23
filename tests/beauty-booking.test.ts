@@ -6,7 +6,7 @@ import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { POST as book } from "../app/api/public/beauty/appointments/route";
 import { GET as readSession, POST as login } from "../app/api/platform/auth/session/route";
-import { GET as list, PATCH as update } from "../app/api/platform/customer/appointments/route";
+import { GET as list, PATCH as update, DELETE as del } from "../app/api/platform/customer/appointments/route";
 import { hongKongDate } from "../lib/beauty/catalog";
 import { validateBeautyRequest } from "../lib/beauty/booking";
 import { bookingFailureMessage } from "../lib/beauty/client-errors";
@@ -55,7 +55,7 @@ before(async () => {
     create function auth.uid() returns uuid language sql stable as $$select (auth.jwt()->>'sub')::uuid$$;
     grant usage on schema auth to authenticated;
     grant execute on function auth.uid(),auth.jwt() to authenticated;`);
-  for (const migration of ["001_multi_tenant_foundation.sql", "002_rls_write_hardening.sql", "20261123105304_auth_tenant_isolation.sql", "20261123110214_beauty_appointment_requests.sql"]) {
+  for (const migration of ["001_multi_tenant_foundation.sql", "002_rls_write_hardening.sql", "20261123105304_auth_tenant_isolation.sql", "20261123110214_beauty_appointment_requests.sql", "20261123233500_update_appointment_transition.sql"]) {
     await db.exec((await readFile(new URL(`../supabase/migrations/${migration}`, import.meta.url), "utf8")).replace(/create extension if not exists pgcrypto;/i,""));
   }
   await db.exec(`insert into auth.users(id) values ('${userA}'),('${userB}');
@@ -103,6 +103,10 @@ before(async () => {
       if(options?.method==="PATCH"){
         const values=JSON.parse(String(options.body));
         return single((await db.query("update public.appointments set status=$1,updated_at=$2 where id=$3 and organization_id=$4 and status=$5 returning *",[values.status,values.updated_at,recordId,org,url.searchParams.get("status")?.replace(/^eq\./,"")])).rows);
+      }
+      if(options?.method==="DELETE"){
+        const deleted=(await db.query("delete from public.appointments where id=$1 and organization_id=$2 returning *",[recordId,org])).rows;
+        return Response.json(deleted[0]||{});
       }
       if(recordId)return single((await db.query("select * from public.appointments where id=$1 and organization_id=$2",[recordId,org])).rows);
       const key=url.searchParams.get("request_key")?.replace(/^eq\./,"");
@@ -174,14 +178,22 @@ test("merchant A sees request after login; merchant B cannot read or change it",
   const row=(await db.query<{status:string}>("select status from public.appointments where id=$1",[receipt])).rows[0];assert.equal(row.status,"pending");
 });
 
-test("confirm then complete persists across database restart and fresh login",async()=>{
+test("appointment confirm, complete, revert and delete lifecycle persists across restart and fresh login",async()=>{
   const a=await cookieFor();assert.equal((await update(req("PATCH",{appointmentId:receipt,status:"confirmed"},a))).status,200);
   await db.close();db=new PGlite(directory);
   const newCookie=await cookieFor();assert.equal((await (await readSession(req("GET",undefined,newCookie))).json()).authenticated,true);
   assert.equal((await (await list(req("GET",undefined,newCookie))).json()).appointments[0].status,"confirmed");
   assert.equal((await update(req("PATCH",{appointmentId:receipt,status:"completed"},newCookie))).status,200);
+  assert.equal((await (await list(req("GET",undefined,newCookie))).json()).appointments[0].status,"completed");
   assert.equal((await update(req("PATCH",{appointmentId:receipt,status:"pending"},newCookie))).status,400);
   await assert.rejects(db.query("update public.appointments set status='pending' where id=$1",[receipt]),/Invalid appointment status transition/);
+  // Revert: completed -> confirmed
+  assert.equal((await update(req("PATCH",{appointmentId:receipt,status:"confirmed"},newCookie))).status,200);
+  assert.equal((await (await list(req("GET",undefined,newCookie))).json()).appointments[0].status,"confirmed");
+  // Delete: delete appointment
+  assert.equal((await del(req("DELETE",undefined,newCookie,`/api/platform/customer/appointments?appointmentId=${receipt}`))).status,200);
+  assert.equal((await (await list(req("GET",undefined,newCookie))).json()).appointments.length,0);
+  assert.equal((await db.query("select * from public.appointments where id=$1",[receipt])).rows.length,0);
 });
 
 test("pending request can be rejected; invalid status cannot be persisted",async()=>{

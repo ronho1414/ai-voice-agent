@@ -86,10 +86,12 @@ export function CustomerDashboard() {
     try {
       if (tab === "overview") {
         const res = await fetch("/api/platform/customer/overview", { cache: "no-store" });
+        if (!res.ok) throw new Error("無法載入資料，請稍後重試；目前顯示並非最新數據。");
         if (res.ok) setOverview(await res.json());
       }
       if (tab === "calls") {
         const res = await fetch("/api/platform/customer/conversations", { cache: "no-store" });
+        if (!res.ok) throw new Error("無法載入資料，請稍後重試；目前顯示並非最新數據。");
         if (res.ok) {
           const body = await res.json();
           setConversations(body.conversations || []);
@@ -97,6 +99,7 @@ export function CustomerDashboard() {
       }
       if (tab === "appointments") {
         const res = await fetch("/api/platform/customer/appointments", { cache: "no-store" });
+        if (!res.ok) throw new Error("無法載入資料，請稍後重試；目前顯示並非最新數據。");
         if (res.ok) {
           const body = await res.json();
           setAppointments(body.appointments || []);
@@ -104,6 +107,7 @@ export function CustomerDashboard() {
       }
       if (tab === "knowledge") {
         const res = await fetch("/api/platform/customer/knowledge", { cache: "no-store" });
+        if (!res.ok) throw new Error("無法載入資料，請稍後重試；目前顯示並非最新數據。");
         if (res.ok) {
           const body = await res.json();
           setKnowledgeSources(body.sources || []);
@@ -111,6 +115,7 @@ export function CustomerDashboard() {
       }
       if (tab === "profile") {
         const res = await fetch("/api/platform/customer/profile", { cache: "no-store" });
+        if (!res.ok) throw new Error("無法載入資料，請稍後重試；目前顯示並非最新數據。");
         if (res.ok) {
           const body = await res.json();
           const p = body.profile;
@@ -126,6 +131,7 @@ export function CustomerDashboard() {
       }
       if (tab === "agent") {
         const res = await fetch("/api/platform/customer/agent", { cache: "no-store" });
+        if (!res.ok) throw new Error("無法載入資料，請稍後重試；目前顯示並非最新數據。");
         if (res.ok) {
           const body = await res.json();
           setAgentInfo(body.agent || null);
@@ -584,7 +590,7 @@ export function CustomerDashboard() {
               <div className="p-5 rounded-2xl bg-white border border-[#E4E4E7] shadow-stripe-sm">
                 <DashboardIcon name="calls" className="h-5 w-5 text-[#09090B]" />
                 <div className="mt-2 text-3xl font-extrabold text-[#09090B]">
-                  {overview?.monthlyConversations ?? 0}
+                  {overview?.monthlyConversations ?? "—"}
                 </div>
                 <div className="mt-1 text-xs text-[#71717A]">本月接待通話</div>
               </div>
@@ -592,7 +598,7 @@ export function CustomerDashboard() {
               <div className="p-5 rounded-2xl bg-white border border-[#E4E4E7] shadow-stripe-sm">
                 <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5 text-[#09090B]" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
                 <div className="mt-2 text-3xl font-extrabold text-[#09090B]">
-                  {overview?.totalCallMinutes ?? 0}
+                  {overview?.totalCallMinutes ?? "—"}
                 </div>
                 <div className="mt-1 text-xs text-[#71717A]">本月通話分鐘</div>
               </div>
@@ -600,9 +606,9 @@ export function CustomerDashboard() {
               <div className="p-5 rounded-2xl bg-white border border-[#E4E4E7] shadow-stripe-sm">
                 <DashboardIcon name="appointments" className="h-5 w-5 text-[#09090B]" />
                 <div className="mt-2 text-3xl font-extrabold text-[#09090B]">
-                  {overview?.totalAppointments ?? 0}
+                  {overview?.totalAppointments ?? "—"}
                 </div>
-                <div className="mt-1 text-xs text-[#71717A]">預約請求（{overview?.pendingAppointments ?? 0} 項待確認）</div>
+                <div className="mt-1 text-xs text-[#71717A]">預約請求（{overview?.pendingAppointments ?? "—"} 項待確認）</div>
               </div>
 
               <div className="p-5 rounded-2xl bg-white border border-[#E4E4E7] shadow-stripe-sm">
