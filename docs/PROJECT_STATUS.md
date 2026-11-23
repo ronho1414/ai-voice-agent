@@ -1,10 +1,12 @@
 # Orai Service — Project Status & Security Review
 
 **Date:** 2026-11-24  
-**Branch:** `review/supabase-auth-audit`  
+**Branch:** `main` (commit `a258a51`)  
 **Target:** `main`  
 **Framework:** Next.js 15.5.29 (React 19, TypeScript, Tailwind CSS)  
-**Database & Auth:** Supabase (PostgreSQL 15+, Supabase Auth SSR, RLS)
+**Database & Auth:** Supabase (PostgreSQL 15+, Supabase Auth SSR, RLS)  
+**Production Hosting:** Vercel (`https://ai-voice-agent-five-tau.vercel.app`)  
+**Hosted Database:** Supabase Cloud (`https://jkzjluyldahlifufoiql.supabase.co`)
 
 ---
 
@@ -53,13 +55,13 @@
 
 All database migrations are located in `supabase/migrations/`:
 
-| Migration File | Purpose | Status |
-| :--- | :--- | :--- |
-| `001_multi_tenant_foundation.sql` | Core schemas (`organizations`, `profiles`, `members`, `agents`, `conversations`, `appointments`, `usage_records`) & initial RLS | Applied |
-| `002_rls_write_hardening.sql` | Column-level update grants and customer admin helper functions | Applied |
-| `20261123105304_auth_tenant_isolation.sql` | Hardens auth session checks into schema `private`, sets explicit table grants | Applied |
-| `20261123110214_beauty_appointment_requests.sql` | Adds appointment request hash, time window, and state transition trigger | Applied |
-| `20261123233500_update_appointment_transition.sql` | Permits reversible appointment transitions (`completed` <-> `confirmed`) & adds `appointments_delete` policy | New |
+| Migration File | Purpose | Local Test Status | Hosted DB Status |
+| :--- | :--- | :--- | :--- |
+| `001_multi_tenant_foundation.sql` | Core schemas (`organizations`, `profiles`, `members`, `agents`, `conversations`, `appointments`, `usage_records`) & initial RLS | Applied | Applied |
+| `002_rls_write_hardening.sql` | Column-level update grants and customer admin helper functions | Applied | Applied |
+| `20261123105304_auth_tenant_isolation.sql` | Hardens auth session checks into schema `private`, sets explicit table grants | Applied | Applied |
+| `20261123110214_beauty_appointment_requests.sql` | Adds appointment request hash, time window, and state transition trigger | Applied | Applied |
+| `20261123233500_update_appointment_transition.sql` | Permits reversible appointment transitions (`completed` <-> `confirmed`) & adds `appointments_delete` policy | Applied | **Pending Application** |
 
 ### Security Measures & Defense-in-Depth
 1. **Private Schema Helpers:** Security definer functions (`current_session_is_active`, `is_super_admin`, `is_customer_admin_for`) are placed in the `private` schema, uncallable by `anon` or public roles.
@@ -68,24 +70,53 @@ All database migrations are located in `supabase/migrations/`:
 
 ---
 
-## 3. Unfinished Integrations (Out-of-Scope for Current Phase)
+## 3. Local Verification vs. Hosted Production Checks
 
-The following integrations are intentionally stubbed or scheduled for future phases:
-- **ElevenLabs Live Webhook:** Real-time conversational webhook parsing and post-call analytics ingestion.
-- **Live Telephony / Twilio Integration:** Inbound/outbound SIP trunks and live Hong Kong phone number binding.
-- **WhatsApp Cloud API:** Automated appointment confirmation and reminder messaging.
-- **Google Calendar / External CalDAV Sync:** Real-time bi-directional synchronization with salon calendars.
-- **Subscription Billing:** Automated Stripe billing periods, tier caps, and overage invoicing.
+### A. Local Environment Checks (Automated Test Suite)
+- **Database Engine:** In-memory PostgreSQL 15 (`@electric-sql/pglite`) running all migrations from scratch.
+- **Test Results:** 35 passing tests, 0 failures, 0 skipped (`npm run test:security`, `npm run test:booking`, `tests/production-data.test.ts`).
+- **TypeScript Typecheck:** `tsc --noEmit` passed with 0 errors.
+- **Production Build:** `next build` passed successfully, producing 24 optimized static and dynamic routes.
+
+### B. Hosted Database Checks (`https://jkzjluyldahlifufoiql.supabase.co`)
+- **Safe Non-Destructive Probe Result:**
+  - An authenticated DELETE test against a zero UUID (`00000000-0000-0000-0000-000000000000`) returned PostgreSQL error `42501 permission denied for table appointments`.
+  - **Conclusion:** Migration `20261123233500_update_appointment_transition.sql` has **not** been run on the hosted database yet (since it contains `GRANT DELETE ON public.appointments TO authenticated;`).
+  - As a result, on the hosted instance, attempting to revert an appointment (`completed` -> `confirmed`) or delete an appointment fails with `Invalid appointment status transition` or permission denied.
+- **Account & Profile Audit:**
+  - Exactly 1 customer admin exists (`test@orai.hk`, role `user` / `customer_admin` for `test-org`).
+  - **Zero `super_admin` accounts exist** in the hosted database. Admin dashboard (`/admin`) login will reject all users until an administrator is provisioned with `system_role = 'super_admin'`.
+- **Existing Records:**
+  - 3 existing appointment records remain intact (`陳小姐`, `wong 先生`, `Orai`). No production data was altered.
+
+### C. Hosted Vercel Health Checks (`https://ai-voice-agent-five-tau.vercel.app`)
+- **Public & Dashboard Pages:**
+  - `GET /` -> HTTP 200 (OK)
+  - `GET /beauty` -> HTTP 200 (OK)
+  - `GET /dashboard` -> HTTP 200 (OK)
+  - `GET /admin` -> HTTP 200 (OK)
+- **API Authorization Guard:**
+  - `GET /api/platform/admin/overview` (unauthenticated) -> HTTP 401 `{"error":"請先登入"}`
+  - `GET /api/platform/customer/overview` (unauthenticated) -> HTTP 401 `{"error":"請先登入"}`
+- **Auth Endpoint Configuration:**
+  - `POST /api/platform/auth/session` -> HTTP 503 `{"error":"尚未設定 Supabase Auth"}`.
+  - **Diagnosis:** Vercel project environment variables need `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` configured in the Vercel dashboard and redeployed, as `authConfigured()` evaluates to `false` in the deployed environment.
 
 ---
 
-## 4. Known Issues & Operational Setup Requirements
+## 4. Remaining Blockers Before Real Customer Onboarding
 
-1. **Supabase Cloud Database Trigger Update:**
-   - The cloud database (`https://jkzjluyldahlifufoiql.supabase.co`) was initially populated with migration `20261123110214`, which rejected transitions from `completed` back to `confirmed`.
-   - **Resolution:** Execute `supabase/migrations/20261123233500_update_appointment_transition.sql` in the Supabase SQL Editor to update `private.enforce_appointment_transition()`.
-2. **Production Data Fallback Protection:**
-   - In `NODE_ENV=production`, local JSON fallbacks are disabled (`assertLocalAllowed()`). If database credentials are missing or down, the API returns HTTP 503 instead of serving sample or mock data.
+1. **Supabase Cloud Migration `20261123233500` Execution:**
+   - Execute the SQL in Supabase SQL Editor to enable reversible appointment status transitions (`completed` <-> `confirmed`) and grant delete permissions.
+2. **Vercel Production Environment Variables:**
+   - Configure `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in the Vercel dashboard and trigger a redeploy so Supabase Auth can process login requests on production.
+3. **Super Admin Account Provisioning:**
+   - Provision an administrative user in Supabase Auth and assign `system_role = 'super_admin'` in `profiles` to enable access to `/admin`.
+4. **Out-of-Scope Production Integrations (Phase 2):**
+   - ElevenLabs live webhook & Agent ID binding.
+   - Live telephony / Twilio Hong Kong phone numbers.
+   - WhatsApp business confirmation notifications.
+   - Google Calendar sync.
 
 ---
 
