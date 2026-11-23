@@ -79,10 +79,12 @@ export function OraiAdminDashboard() {
     try {
       if (tab === "overview" || tab === "system") {
         const res = await fetch("/api/platform/admin/overview", { cache: "no-store" });
+        if (!res.ok) throw new Error("無法載入資料，請稍後重試；目前顯示並非最新數據。");
         if (res.ok) setOverview(await res.json());
       }
       if (tab === "customers" || tab === "agents") {
         const res = await fetch("/api/platform/admin/organizations", { cache: "no-store" });
+        if (!res.ok) throw new Error("無法載入資料，請稍後重試；目前顯示並非最新數據。");
         if (res.ok) {
           const body = await res.json();
           setOrganizations(body.organizations || []);
@@ -90,6 +92,7 @@ export function OraiAdminDashboard() {
       }
       if (tab === "usage") {
         const res = await fetch("/api/platform/admin/usage", { cache: "no-store" });
+        if (!res.ok) throw new Error("無法載入資料，請稍後重試；目前顯示並非最新數據。");
         if (res.ok) {
           const body = await res.json();
           setUsageList(body.usage || []);
@@ -408,17 +411,17 @@ export function OraiAdminDashboard() {
               <div className="p-5 rounded-2xl bg-white border border-[#E4E4E7] shadow-stripe-sm">
                 <div className="text-xs font-bold text-[#52525B] uppercase">總商戶數</div>
                 <div className="mt-2 text-3xl font-extrabold text-[#09090B]">
-                  {overview?.totalCustomers ?? 0}
+                  {overview?.totalCustomers ?? "—"}
                 </div>
                 <div className="mt-1 text-[11px] text-[#71717A]">
-                  活躍商戶：{overview?.activeCustomers ?? 0} 家
+                  活躍商戶：{overview?.activeCustomers ?? "—"} 家
                 </div>
               </div>
 
               <div className="p-5 rounded-2xl bg-white border border-[#E4E4E7] shadow-stripe-sm">
                 <div className="text-xs font-bold text-[#52525B] uppercase">活躍專員</div>
                 <div className="mt-2 text-3xl font-extrabold text-emerald-600">
-                  {overview?.activeCustomers ?? 0}
+                  {overview?.activeCustomers ?? "—"}
                 </div>
                 <div className="mt-1 text-[11px] text-[#71717A]">全天候在線運作</div>
               </div>
@@ -426,7 +429,7 @@ export function OraiAdminDashboard() {
               <div className="p-5 rounded-2xl bg-white border border-[#E4E4E7] shadow-stripe-sm">
                 <div className="text-xs font-bold text-[#52525B] uppercase">累計對話次數</div>
                 <div className="mt-2 text-3xl font-extrabold text-[#09090B]">
-                  {overview?.totalConversations ?? 0}
+                  {overview?.totalConversations ?? "—"}
                 </div>
                 <div className="mt-1 text-[11px] text-[#71717A]">網頁與電話諮詢</div>
               </div>
@@ -434,7 +437,7 @@ export function OraiAdminDashboard() {
               <div className="p-5 rounded-2xl bg-white border border-[#E4E4E7] shadow-stripe-sm">
                 <div className="text-xs font-bold text-[#52525B] uppercase">通話時長 (分鐘)</div>
                 <div className="mt-2 text-3xl font-extrabold text-[#09090B]">
-                  {overview?.totalUsageMinutes ?? 0}
+                  {overview?.totalUsageMinutes ?? "—"}
                 </div>
                 <div className="mt-1 text-[11px] text-[#71717A]">計費用量統計</div>
               </div>

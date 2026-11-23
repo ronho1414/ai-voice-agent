@@ -27,7 +27,13 @@ before(async () => {
     grant usage on schema auth to authenticated;
     grant execute on function auth.jwt(), auth.uid() to authenticated;
   `);
-  for (const file of ["001_multi_tenant_foundation.sql", "002_rls_write_hardening.sql", "20261123105304_auth_tenant_isolation.sql"]) {
+  for (const file of [
+    "001_multi_tenant_foundation.sql",
+    "002_rls_write_hardening.sql",
+    "20261123105304_auth_tenant_isolation.sql",
+    "20261123110214_beauty_appointment_requests.sql",
+    "20261123233500_update_appointment_transition.sql",
+  ]) {
     const sql = await readFile(new URL(`../supabase/migrations/${file}`, import.meta.url), "utf8");
     // PGlite has gen_random_uuid built in; the pgcrypto extension is not needed.
     await db.exec(sql.replace(/create extension if not exists pgcrypto;/i, ""));
@@ -90,6 +96,11 @@ test("foreign tenant writes return no rows or reject ownership", async () => {
   assert.equal((await asUser(userA, `update public.knowledge_sources set content='attack' where organization_id='${orgB}' returning id`)).rows.length, 0);
   assert.equal((await asUser(userA, `delete from public.knowledge_sources where organization_id='${orgB}' returning id`)).rows.length, 0);
   assert.equal((await asUser(userA, `update public.appointments set status='confirmed' where organization_id='${orgB}' returning id`)).rows.length, 0);
+  assert.equal((await asUser(userA, `delete from public.appointments where organization_id='${orgB}' returning id`)).rows.length, 0);
+  await assert.rejects(asUser(userA, `update public.conversations set session_id='attack' where organization_id='${orgB}'`), /permission denied/);
+  await assert.rejects(asUser(userA, `delete from public.conversations where organization_id='${orgB}'`), /permission denied/);
+  await assert.rejects(asUser(userA, `update public.usage_records set call_minutes=9999 where organization_id='${orgB}'`), /permission denied/);
+  await assert.rejects(asUser(userA, `delete from public.usage_records where organization_id='${orgB}'`), /permission denied/);
   await assert.rejects(asUser(userA, `insert into public.knowledge_sources(organization_id,title) values ('${orgB}','attack')`), /row-level security/);
   assert.equal((await asUser(userA, `insert into public.knowledge_sources(organization_id,title) values ('${orgA}','Allowed') returning id`)).rows.length, 1);
 });

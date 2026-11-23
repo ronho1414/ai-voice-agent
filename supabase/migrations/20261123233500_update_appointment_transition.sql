@@ -21,4 +21,10 @@ begin
 end;
 $$;
 
+-- Allow customer admins and super admins to delete appointments of their organization
+grant delete on public.appointments to authenticated;
+drop policy if exists appointments_delete on public.appointments;
+create policy appointments_delete on public.appointments for delete to authenticated
+  using (private.is_super_admin() or private.is_customer_admin_for(organization_id));
+
 commit;

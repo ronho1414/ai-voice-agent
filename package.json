@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test:security": "node --import tsx --test tests/auth-api.test.ts tests/tenant-isolation.test.ts",
+    "test:security": "node --import tsx --test tests/auth-api.test.ts tests/tenant-isolation.test.ts tests/production-data.test.ts",
     "test:booking": "node --import tsx --test tests/beauty-booking.test.ts",
     "generate:clips": "tsx scripts/generate-clips.ts"
   },
