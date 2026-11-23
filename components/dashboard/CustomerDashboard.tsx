@@ -192,6 +192,26 @@ export function CustomerDashboard() {
     }
   }
 
+  async function handleDeleteAppointment(appointmentId: string) {
+    if (!window.confirm("確定要永久刪除這筆預約記錄嗎？此操作無法還原。")) return;
+    setBusy(`appointment_delete_${appointmentId}`);
+    setError("");
+    try {
+      const res = await fetch(`/api/platform/customer/appointments?appointmentId=${encodeURIComponent(appointmentId)}`, {
+        method: "DELETE",
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "刪除預約失敗");
+      setAppointments((prev) => prev.filter((a) => a.id !== appointmentId));
+      setSuccessMsg("預約記錄已成功刪除");
+      setTimeout(() => setSuccessMsg(""), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "刪除預約失敗");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function handleSaveProfile(e: FormEvent) {
     e.preventDefault();
     setBusy("save_prof");
@@ -694,176 +714,236 @@ export function CustomerDashboard() {
         )}
 
         {/* 3. APPOINTMENTS TAB */}
-        {tab === "appointments" && (
-          <div className="space-y-6">
-            <header>
-              <h1 className="text-2xl font-extrabold tracking-tight">預約管理</h1>
-              <p className="text-xs text-[#52525B] mt-1">
-                查看網站提交的預約要求，確認、拒絕或完成服務。所選時段須由店員再確認。
-              </p>
-            </header>
+        {tab === "appointments" && (() => {
+          const activeAppointments = appointments.filter((a) => a.status !== "completed");
+          const completedAppointments = appointments.filter((a) => a.status === "completed");
 
-            {appointments.length === 0 ? (
-              <div className="p-12 text-center rounded-2xl bg-white border border-[#E4E4E7]">
-                <p className="text-sm font-semibold text-[#52525B]">暫無預約申請</p>
-                <p className="text-xs text-[#71717A] mt-1">網站提交的預約要求會顯示喺呢度，由店員再確認時段。</p>
+          return (
+            <div className="space-y-8">
+              {/* SECTION A: 待處理 / 進行中預約 */}
+              <div className="space-y-4">
+                <header>
+                  <h1 className="text-2xl font-extrabold tracking-tight">預約管理</h1>
+                  <p className="text-xs text-[#52525B] mt-1">
+                    查看網站提交的預約要求，確認或完成服務。完成後會自動移至下方「已完成記錄」。
+                  </p>
+                </header>
+
+                {activeAppointments.length === 0 ? (
+                  <div className="p-10 text-center rounded-2xl bg-white border border-[#E4E4E7]">
+                    <p className="text-sm font-semibold text-[#52525B]">暫無待處理預約</p>
+                    <p className="text-xs text-[#71717A] mt-1">新提交的預約要求會顯示喺呢度，由店員確認或安排。</p>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-[#E4E4E7] bg-white overflow-hidden shadow-stripe-sm">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-[#E4E4E7] bg-[#FAFAFA] font-bold text-[#52525B]">
+                          <th className="p-4">顧客姓名</th>
+                          <th className="p-4">聯絡電話</th>
+                          <th className="p-4">預約項目</th>
+                          <th className="p-4">希望到訪時間（香港）</th>
+                          <th className="p-4">狀態</th>
+                          <th className="p-4 text-right">更改狀態</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E4E4E7]">
+                        {activeAppointments.map((a) => (
+                          <tr key={a.id} className="hover:bg-[#FAFAFA]">
+                            <td className="p-4 font-extrabold text-[#09090B]">{a.customer_name}</td>
+                            <td className="p-4 font-mono font-medium text-[#52525B]">
+                              <a href={`tel:${a.customer_phone}`} className="hover:underline">
+                                {a.customer_phone}
+                              </a>
+                            </td>
+                            <td className="p-4 font-semibold">{a.service_name || "待確認項目"}</td>
+                            <td className="p-4 whitespace-nowrap text-[#52525B]">
+                              {new Date(a.appointment_time).toLocaleString("zh-HK", {
+                                timeZone: "Asia/Hong_Kong",
+                                month: "short",
+                                day: "numeric",
+                                weekday: "short",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                              {a.preferred_time_window && <div className="mt-1 text-[11px]">偏好：{BEAUTY_WINDOWS[a.preferred_time_window].label}</div>}
+                              {a.notes && <div className="mt-2 max-w-52 whitespace-pre-wrap text-[11px]">備註：{a.notes}</div>}
+                            </td>
+                            <td className="p-4">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                  a.status === "confirmed"
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : a.status === "cancelled" || a.status === "rejected"
+                                    ? "bg-rose-100 text-rose-700"
+                                    : "bg-amber-100 text-amber-800"
+                                }`}
+                              >
+                                {a.status === "pending"
+                                  ? "待確認"
+                                  : a.status === "confirmed"
+                                  ? "已確認"
+                                  : a.status === "rejected"
+                                  ? "已拒絕"
+                                  : "已取消"}
+                              </span>
+                            </td>
+                            <td className="p-4 text-right space-x-1.5 whitespace-nowrap">
+                              {a.status === "pending" && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateAppointmentStatus(a.id, "confirmed")}
+                                    disabled={busy === `appointment_${a.id}`}
+                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold disabled:opacity-50 transition-colors"
+                                  >
+                                    確認
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateAppointmentStatus(a.id, "rejected")}
+                                    disabled={busy === `appointment_${a.id}`}
+                                    className="px-2.5 py-1.5 rounded-lg border border-rose-200 text-rose-700 text-[11px] font-bold hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                                  >
+                                    拒絕
+                                  </button>
+                                </>
+                              )}
+                              {a.status === "confirmed" && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateAppointmentStatus(a.id, "completed")}
+                                    disabled={busy === `appointment_${a.id}`}
+                                    className="px-2.5 py-1.5 rounded-lg bg-[#09090B] hover:bg-[#27272A] text-white text-[11px] font-bold disabled:opacity-50 transition-colors"
+                                  >
+                                    完成
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateAppointmentStatus(a.id, "cancelled")}
+                                    disabled={busy === `appointment_${a.id}`}
+                                    className="px-2.5 py-1.5 rounded-lg border border-[#E4E4E7] text-rose-600 text-[11px] font-bold hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                                  >
+                                    取消
+                                  </button>
+                                </>
+                              )}
+                              {(a.status === "rejected" || a.status === "cancelled") && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateAppointmentStatus(a.id, "confirmed")}
+                                    disabled={busy === `appointment_${a.id}`}
+                                    className="px-2.5 py-1.5 rounded-lg border border-emerald-600 text-emerald-700 text-[11px] font-bold hover:bg-emerald-50 disabled:opacity-50 transition-colors"
+                                  >
+                                    返回確認
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteAppointment(a.id)}
+                                    disabled={busy === `appointment_delete_${a.id}`}
+                                    className="px-2.5 py-1.5 rounded-lg border border-rose-200 text-rose-700 text-[11px] font-bold hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                                  >
+                                    刪除
+                                  </button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="rounded-2xl border border-[#E4E4E7] bg-white overflow-hidden shadow-stripe-sm">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b border-[#E4E4E7] bg-[#FAFAFA] font-bold text-[#52525B]">
-                      <th className="p-4">顧客姓名</th>
-                      <th className="p-4">聯絡電話</th>
-                      <th className="p-4">預約項目</th>
-                      <th className="p-4">希望到訪時間（香港）</th>
-                      <th className="p-4">狀態</th>
-                      <th className="p-4 text-right">更改狀態</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#E4E4E7]">
-                    {appointments.map((a) => (
-                      <tr key={a.id} className="hover:bg-[#FAFAFA]">
-                        <td className="p-4 font-extrabold text-[#09090B]">{a.customer_name}</td>
-                        <td className="p-4 font-mono font-medium text-[#52525B]">
-                          <a href={`tel:${a.customer_phone}`} className="hover:underline">
-                            {a.customer_phone}
-                          </a>
-                        </td>
-                        <td className="p-4 font-semibold">{a.service_name || "待確認項目"}</td>
-                        <td className="p-4 whitespace-nowrap text-[#52525B]">
-                          {new Date(a.appointment_time).toLocaleString("zh-HK", {
-                            timeZone: "Asia/Hong_Kong",
-                            month: "short",
-                            day: "numeric",
-                            weekday: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                          {a.preferred_time_window && <div className="mt-1 text-[11px]">偏好：{BEAUTY_WINDOWS[a.preferred_time_window].label}</div>}
-                          {a.notes && <div className="mt-2 max-w-52 whitespace-pre-wrap text-[11px]">備註：{a.notes}</div>}
-                        </td>
-                        <td className="p-4">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                              a.status === "confirmed"
-                                ? "bg-emerald-100 text-emerald-800"
-                                : a.status === "completed"
-                                ? "bg-slate-100 text-slate-700"
-                                : a.status === "cancelled" || a.status === "rejected"
-                                ? "bg-rose-100 text-rose-700"
-                                : "bg-amber-100 text-amber-800"
-                            }`}
-                          >
-                            {a.status === "pending"
-                              ? "待確認"
-                              : a.status === "confirmed"
-                              ? "已確認"
-                              : a.status === "completed"
-                              ? "已服務"
-                              : a.status === "rejected"
-                              ? "已拒絕"
-                              : "已取消"}
-                          </span>
-                        </td>
-                        <td className="p-4 text-right space-x-1.5 whitespace-nowrap">
-                          {a.status === "pending" && (
-                            <>
+
+              {/* SECTION B: 已完成記錄 */}
+              <div className="space-y-4 pt-4 border-t border-[#E4E4E7]">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-xl font-extrabold tracking-tight">已完成記錄</h2>
+                    <p className="text-xs text-[#52525B] mt-0.5">
+                      已完成服務的預約存檔。如需修改時段或按錯完成，可點擊「返回確認」退回上方；亦可點擊「刪除」。
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-[#52525B] bg-slate-100 px-2.5 py-1 rounded-full">
+                    共 {completedAppointments.length} 項
+                  </span>
+                </div>
+
+                {completedAppointments.length === 0 ? (
+                  <div className="p-8 text-center rounded-2xl bg-white border border-[#E4E4E7]">
+                    <p className="text-xs text-[#71717A]">暫無已完成服務的記錄</p>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-[#E4E4E7] bg-white overflow-hidden shadow-stripe-sm">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-[#E4E4E7] bg-[#FAFAFA] font-bold text-[#52525B]">
+                          <th className="p-4">顧客姓名</th>
+                          <th className="p-4">聯絡電話</th>
+                          <th className="p-4">服務項目</th>
+                          <th className="p-4">到訪時間（香港）</th>
+                          <th className="p-4">狀態</th>
+                          <th className="p-4 text-right">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E4E4E7]">
+                        {completedAppointments.map((a) => (
+                          <tr key={a.id} className="hover:bg-[#FAFAFA]">
+                            <td className="p-4 font-extrabold text-[#09090B]">{a.customer_name}</td>
+                            <td className="p-4 font-mono font-medium text-[#52525B]">
+                              <a href={`tel:${a.customer_phone}`} className="hover:underline">
+                                {a.customer_phone}
+                              </a>
+                            </td>
+                            <td className="p-4 font-semibold">{a.service_name || "護理項目"}</td>
+                            <td className="p-4 whitespace-nowrap text-[#52525B]">
+                              {new Date(a.appointment_time).toLocaleString("zh-HK", {
+                                timeZone: "Asia/Hong_Kong",
+                                month: "short",
+                                day: "numeric",
+                                weekday: "short",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                              {a.preferred_time_window && <div className="mt-1 text-[11px]">偏好：{BEAUTY_WINDOWS[a.preferred_time_window].label}</div>}
+                              {a.notes && <div className="mt-2 max-w-52 whitespace-pre-wrap text-[11px]">備註：{a.notes}</div>}
+                            </td>
+                            <td className="p-4">
+                              <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
+                                已服務
+                              </span>
+                            </td>
+                            <td className="p-4 text-right space-x-1.5 whitespace-nowrap">
                               <button
                                 type="button"
                                 onClick={() => handleUpdateAppointmentStatus(a.id, "confirmed")}
                                 disabled={busy === `appointment_${a.id}`}
-                                className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold disabled:opacity-50 transition-colors"
-                              >
-                                確認
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateAppointmentStatus(a.id, "rejected")}
-                                disabled={busy === `appointment_${a.id}`}
-                                className="px-2 py-1 rounded border border-rose-200 text-rose-700 text-[11px] font-bold hover:bg-rose-50 disabled:opacity-50 transition-colors"
-                              >
-                                拒絕
-                              </button>
-                            </>
-                          )}
-                          {a.status === "confirmed" && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateAppointmentStatus(a.id, "completed")}
-                                disabled={busy === `appointment_${a.id}`}
-                                className="px-2 py-1 rounded bg-[#09090B] hover:bg-[#27272A] text-white text-[11px] font-bold disabled:opacity-50 transition-colors"
-                              >
-                                完成
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateAppointmentStatus(a.id, "rejected")}
-                                disabled={busy === `appointment_${a.id}`}
-                                className="px-2 py-1 rounded border border-rose-200 text-rose-700 text-[11px] font-bold hover:bg-rose-50 disabled:opacity-50 transition-colors"
-                              >
-                                拒絕
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateAppointmentStatus(a.id, "cancelled")}
-                                disabled={busy === `appointment_${a.id}`}
-                                className="px-2 py-1 rounded border border-[#E4E4E7] text-rose-600 text-[11px] font-bold hover:bg-rose-50 disabled:opacity-50 transition-colors"
-                              >
-                                取消
-                              </button>
-                            </>
-                          )}
-                          {a.status === "completed" && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateAppointmentStatus(a.id, "confirmed")}
-                                disabled={busy === `appointment_${a.id}`}
-                                className="px-2 py-1 rounded border border-emerald-600 text-emerald-700 text-[11px] font-bold hover:bg-emerald-50 disabled:opacity-50 transition-colors"
+                                className="px-2.5 py-1.5 rounded-lg border border-emerald-600 text-emerald-700 text-[11px] font-bold hover:bg-emerald-50 disabled:opacity-50 transition-colors"
                               >
                                 返回確認
                               </button>
                               <button
                                 type="button"
-                                onClick={() => handleUpdateAppointmentStatus(a.id, "rejected")}
-                                disabled={busy === `appointment_${a.id}`}
-                                className="px-2 py-1 rounded border border-rose-200 text-rose-700 text-[11px] font-bold hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                                onClick={() => handleDeleteAppointment(a.id)}
+                                disabled={busy === `appointment_delete_${a.id}`}
+                                className="px-2.5 py-1.5 rounded-lg border border-rose-200 text-rose-700 text-[11px] font-bold hover:bg-rose-50 disabled:opacity-50 transition-colors"
                               >
-                                拒絕
+                                刪除
                               </button>
-                            </>
-                          )}
-                          {(a.status === "rejected" || a.status === "cancelled") && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateAppointmentStatus(a.id, "confirmed")}
-                                disabled={busy === `appointment_${a.id}`}
-                                className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold disabled:opacity-50 transition-colors"
-                              >
-                                重新確認
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateAppointmentStatus(a.id, "pending")}
-                                disabled={busy === `appointment_${a.id}`}
-                                className="px-2 py-1 rounded border border-[#E4E4E7] text-[#52525B] text-[11px] font-bold hover:bg-slate-50 disabled:opacity-50 transition-colors"
-                              >
-                                待確認
-                              </button>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         {/* KNOWLEDGE BASE TAB */}
         {tab === "knowledge" && (

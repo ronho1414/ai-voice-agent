@@ -581,6 +581,31 @@ function assertAppointmentTransition(current: AppointmentStatus, next: Appointme
   if (current !== next && !transitions[current]?.includes(next)) throw new Error("此預約不能轉換至所選狀態");
 }
 
+export async function deleteAppointment(
+  organizationId: string,
+  appointmentId: string
+): Promise<void> {
+  const sb = supabaseAdmin();
+  if (sb) {
+    const { error } = await sb
+      .from("appointments")
+      .delete()
+      .eq("id", appointmentId)
+      .eq("organization_id", organizationId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const store = await loadLocalStore();
+  const index = store.appointments.findIndex(
+    (a) => a.id === appointmentId && a.organization_id === organizationId
+  );
+  if (index !== -1) {
+    store.appointments.splice(index, 1);
+    await saveLocalStore(store);
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Usage Records
 // -----------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import { withPlatformRequest } from "@/lib/platform/supabase-auth";
 import { requireCustomerAuth } from "@/lib/platform/auth";
-import { listAppointments, updateAppointmentStatus } from "@/lib/platform/store";
+import { listAppointments, updateAppointmentStatus, deleteAppointment } from "@/lib/platform/store";
 import type { AppointmentStatus } from "@/lib/platform/types";
 
 async function handleGET(request: Request) {
@@ -51,5 +51,32 @@ async function handlePATCH(request: Request) {
   }
 }
 
+async function handleDELETE(request: Request) {
+  const auth = await requireCustomerAuth(request);
+  if (auth instanceof Response) return auth;
+
+  const orgId = auth.organizationId;
+  if (!orgId) {
+    return Response.json({ error: "No organization associated" }, { status: 400 });
+  }
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const appointmentId = searchParams.get("appointmentId");
+    if (!appointmentId) {
+      return Response.json({ error: "Missing appointmentId" }, { status: 400 });
+    }
+
+    await deleteAppointment(orgId, appointmentId);
+    return Response.json({ success: true });
+  } catch (err) {
+    return Response.json(
+      { error: err instanceof Error ? err.message : "Failed to delete appointment" },
+      { status: 400 }
+    );
+  }
+}
+
 export const GET = withPlatformRequest(handleGET);
 export const PATCH = withPlatformRequest(handlePATCH);
+export const DELETE = withPlatformRequest(handleDELETE);
