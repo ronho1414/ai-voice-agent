@@ -16,7 +16,7 @@ export type ChannelType = "web" | "phone" | "whatsapp";
 
 export type ConversationStatus = "completed" | "in_progress" | "missed";
 
-export type AppointmentStatus = "pending" | "confirmed" | "cancelled" | "completed";
+export type AppointmentStatus = "pending" | "confirmed" | "rejected" | "cancelled" | "completed";
 
 export type OpeningHours = {
   mon_fri?: string;
@@ -108,6 +108,8 @@ export type Appointment = {
   customer_phone: string;
   service_name: string;
   appointment_time: string;
+  preferred_time_window?: "morning" | "afternoon" | "evening" | null;
+  source?: "admin" | "beauty_website" | "voice";
   notes: string;
   status: AppointmentStatus;
   created_at: string;
@@ -132,4 +134,26 @@ export type PlatformSession = {
   organizationId?: string | null;
   organizationName?: string | null;
   organizationSlug?: string | null;
+};
+
+export type SuperAdminOverview = {
+  totalCustomers: number;
+  activeCustomers: number;
+  totalConversations: number;
+  totalUsageMinutes: number;
+  systemStatus: {
+    database: "connected_supabase" | "local_store";
+    elevenlabsApi: boolean;
+    storage: boolean;
+  };
+};
+
+export type CustomerOverview = {
+  organization: Organization;
+  monthlyConversations: number;
+  totalCallMinutes: number;
+  pendingAppointments: number;
+  totalAppointments: number;
+  agentStatus: AgentStatus;
+  agentName: string;
 };

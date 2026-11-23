@@ -1,3 +1,4 @@
+import { withPlatformRequest } from "@/lib/platform/supabase-auth";
 import { requireAdmin } from "@/lib/admin/guard";
 import { readSiteId } from "@/lib/admin/site";
 import { conversationReport } from "@/lib/admin/store";
@@ -6,8 +7,8 @@ import { fail, json } from "@/lib/http";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request): Promise<Response> {
-  const denied = requireAdmin(request);
+async function handleGET(request: Request): Promise<Response> {
+  const denied = await requireAdmin(request);
   if (denied) return denied;
   try {
     const url = new URL(request.url);
@@ -18,3 +19,5 @@ export async function GET(request: Request): Promise<Response> {
     return fail(error);
   }
 }
+
+export const GET = withPlatformRequest(handleGET);

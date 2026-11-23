@@ -1,3 +1,4 @@
+import { withPlatformRequest } from "@/lib/platform/supabase-auth";
 import { readAgentId, readClientName, readClientSlug, readRouteMap } from "@/lib/admin/clients";
 import { requireAdmin } from "@/lib/admin/guard";
 import { listClients, saveClient, setClientActive } from "@/lib/admin/store";
@@ -6,8 +7,8 @@ import { fail, json } from "@/lib/http";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request): Promise<Response> {
-  const denied = requireAdmin(request);
+async function handleGET(request: Request): Promise<Response> {
+  const denied = await requireAdmin(request);
   if (denied) return denied;
   try {
     return json(await listClients());
@@ -16,8 +17,8 @@ export async function GET(request: Request): Promise<Response> {
   }
 }
 
-export async function POST(request: Request): Promise<Response> {
-  const denied = requireAdmin(request);
+async function handlePOST(request: Request): Promise<Response> {
+  const denied = await requireAdmin(request);
   if (denied) return denied;
   try {
     const body = (await request.json()) as {
@@ -38,8 +39,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-export async function PATCH(request: Request): Promise<Response> {
-  const denied = requireAdmin(request);
+async function handlePATCH(request: Request): Promise<Response> {
+  const denied = await requireAdmin(request);
   if (denied) return denied;
   try {
     const body = (await request.json()) as { clientSlug?: unknown; isActive?: unknown };
@@ -51,3 +52,7 @@ export async function PATCH(request: Request): Promise<Response> {
     return fail(error);
   }
 }
+
+export const GET = withPlatformRequest(handleGET);
+export const POST = withPlatformRequest(handlePOST);
+export const PATCH = withPlatformRequest(handlePATCH);

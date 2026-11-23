@@ -1,99 +1,46 @@
-import { NextRequest } from "next/server";
-import {
-  clearSessionCookie,
-  createSessionCookie,
-  getPlatformSession,
-  unauthorizedResponse
-} from "@/lib/platform/auth";
-import type { PlatformSession } from "@/lib/platform/types";
-import { getOrganizationBySlug } from "@/lib/platform/store";
+import { getPlatformSession } from "@/lib/platform/auth";
+import { authConfigured, requestSupabase, withPlatformRequest } from "@/lib/platform/supabase-auth";
 
-export async function GET(request: NextRequest) {
+export const GET = withPlatformRequest(async (request) => {
   const session = await getPlatformSession(request);
-  if (!session) {
-    return Response.json({ authenticated: false, session: null });
+  return Response.json({ authenticated: Boolean(session), session });
+});
+
+export const POST = withPlatformRequest(async (request) => {
+  let body;
+  try { body = await request.json(); } catch {
+    return Response.json({ error: "登入資料格式不正確" }, { status: 400 });
   }
-  return Response.json({ authenticated: true, session });
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = (await request.json()) as {
-      type: "super_admin" | "customer";
-      password?: string;
-      slug?: string;
-    };
-
-    const adminPassword = process.env.ADMIN_PASSWORD?.trim();
-
-    // 1. Super Admin Login
-    if (body.type === "super_admin") {
-      if (!adminPassword) {
-        return Response.json({ error: "系統未設定 ADMIN_PASSWORD 環境變數" }, { status: 503 });
-      }
-      if (body.password !== adminPassword) {
-        return Response.json({ error: "管理員密碼不正確" }, { status: 401 });
-      }
-
-      const session: PlatformSession = {
-        userId: "super-admin-root",
-        email: "admin@oraiservice.com",
-        fullName: "Orai 總管理員",
-        role: "super_admin",
-      };
-
-      const cookie = createSessionCookie(session);
-      return Response.json(
-        { success: true, session },
-        { headers: { "Set-Cookie": cookie, "Cache-Control": "no-store" } }
-      );
-    }
-
-    // 2. Customer Dashboard Login (via business slug & access code / verification)
-    if (body.type === "customer") {
-      const slug = body.slug?.trim().toLowerCase();
-      if (!slug) {
-        return Response.json({ error: "請輸入商戶代稱 (Slug)" }, { status: 400 });
-      }
-
-      const org = await getOrganizationBySlug(slug);
-      if (!org) {
-        return Response.json({ error: "找不到該商戶，請檢查代稱是否正確" }, { status: 404 });
-      }
-
-      if (org.status === "suspended") {
-        return Response.json({ error: "該商戶帳戶已被暫停，請聯絡 Orai 客服" }, { status: 403 });
-      }
-
-      // Check password if provided, or verify against admin password in early phase
-      if (adminPassword && body.password && body.password !== adminPassword) {
-        return Response.json({ error: "密碼不正確" }, { status: 401 });
-      }
-
-      const session: PlatformSession = {
-        userId: `cust-${org.id.slice(0, 8)}`,
-        email: org.email || `contact@${org.slug}.com`,
-        fullName: org.name,
-        role: "customer_admin",
-        organizationId: org.id,
-        organizationName: org.name,
-        organizationSlug: org.slug,
-      };
-
-      const cookie = createSessionCookie(session);
-      return Response.json(
-        { success: true, session },
-        { headers: { "Set-Cookie": cookie, "Cache-Control": "no-store" } }
-      );
-    }
-
-    return Response.json({ error: "Invalid login type" }, { status: 400 });
-  } catch (err) {
-    return Response.json({ error: err instanceof Error ? err.message : "登入失敗" }, { status: 500 });
+  if (!body || !["super_admin", "customer"].includes(body.type) ||
+      typeof body.email !== "string" || !body.email.trim() || body.email.length > 254 ||
+      typeof body.password !== "string" || !body.password || body.password.length > 1024) {
+    return Response.json({ error: "請輸入登入電郵及密碼" }, { status: 400 });
   }
-}
+  if (!authConfigured()) return Response.json({ error: "尚未設定 Supabase Auth" }, { status: 503 });
+  const supabase = requestSupabase(request);
+  const { data, error } = await supabase.auth.signInWithPassword({ email: body.email.trim(), password: body.password });
+  if (error?.status === 429) return Response.json({ error: "登入嘗試太頻密，請稍後再試。" }, { status: 429 });
+  if (error && (!error.status || error.status >= 500 || error.name === "AuthRetryableFetchError")) {
+    return Response.json({ error: "暫時無法連線登入服務，請稍後再試。", code: "AUTH_SERVICE_UNAVAILABLE" }, { status: 503 });
+  }
+  if (error || !data.user) return Response.json({ error: "登入電郵或密碼不正確" }, { status: 401 });
+  const session = await getPlatformSession(request);
+  const expectedRole = body.type === "super_admin" ? "super_admin" : "customer_admin";
+  if (!session || session.role !== expectedRole) {
+    await supabase.auth.signOut({ scope: "local" });
+    return Response.json({ error: "此帳戶未有啟用的後台權限" }, { status: 403 });
+  }
+  return Response.json({ success: true, session });
+});
 
-export async function DELETE() {
-  const cookie = clearSessionCookie();
-  return Response.json({ success: true }, { headers: { "Set-Cookie": cookie, "Cache-Control": "no-store" } });
-}
+export const DELETE = withPlatformRequest(async (request) => {
+  if (authConfigured()) {
+    const { error } = await requestSupabase(request).auth.signOut({ scope: "local" });
+    if (error) return Response.json({ error: "登出失敗，請重試" }, { status: 503 });
+  }
+  const response = Response.json({ success: true });
+  for (const name of ["orai_auth_session", "vp_admin"]) {
+    response.headers.append("Set-Cookie", `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${process.env.NODE_ENV === "production" ? "; Secure" : ""}`);
+  }
+  return response;
+});

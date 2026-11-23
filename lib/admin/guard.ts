@@ -1,18 +1,6 @@
-import { adminConfigured, isAdminRequest } from "@/lib/admin/auth";
+import { requireSuperAdmin } from "@/lib/platform/auth";
 
-export function adminUnavailable(): Response {
-  return Response.json(
-    { error: "Admin password is not configured" },
-    { status: 503, headers: { "Cache-Control": "no-store" } },
-  );
-}
-
-export function unauthorized(): Response {
-  return Response.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
-}
-
-export function requireAdmin(request: Request): Response | null {
-  if (!adminConfigured()) return adminUnavailable();
-  if (!isAdminRequest(request)) return unauthorized();
-  return null;
+export async function requireAdmin(request: Request): Promise<Response | null> {
+  const auth = await requireSuperAdmin(request);
+  return auth instanceof Response ? auth : null;
 }

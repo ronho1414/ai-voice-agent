@@ -8,9 +8,12 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test:security": "node --import tsx --test tests/auth-api.test.ts tests/tenant-isolation.test.ts",
+    "test:booking": "node --import tsx --test tests/beauty-booking.test.ts",
     "generate:clips": "tsx scripts/generate-clips.ts"
   },
   "dependencies": {
+    "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "^2.119.0",
     "gsap": "^3.13.0",
     "mammoth": "^1.13.0",
@@ -20,6 +23,7 @@
     "react-dom": "19.1.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.17",
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",

@@ -1,3 +1,4 @@
+import { withPlatformRequest } from "@/lib/platform/supabase-auth";
 import { requireAdmin } from "@/lib/admin/guard";
 import { readSiteId } from "@/lib/admin/site";
 import { fail, json } from "@/lib/http";
@@ -7,8 +8,8 @@ import { readUtterance } from "@/lib/voice-engine/utterance";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request): Promise<Response> {
-  const denied = requireAdmin(request);
+async function handlePOST(request: Request): Promise<Response> {
+  const denied = await requireAdmin(request);
   if (denied) return denied;
   try {
     const body: unknown = await request.json();
@@ -21,3 +22,5 @@ export async function POST(request: Request): Promise<Response> {
     return fail(error);
   }
 }
+
+export const POST = withPlatformRequest(handlePOST);

@@ -70,6 +70,7 @@ export function VoicePilotSite() {
   return (
     <div
       className="bg-white text-[#09090B] antialiased selection:bg-[#09090B]/10 selection:text-[#09090B]"
+      suppressHydrationWarning
       dangerouslySetInnerHTML={{ __html: VOICEPILOT_MARKUP }}
     />
   );

@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { withPlatformRequest } from "@/lib/platform/supabase-auth";
 import { requireSuperAdmin } from "@/lib/platform/auth";
 import {
   listOrganizations,
@@ -8,7 +8,7 @@ import {
   upsertAgent
 } from "@/lib/platform/store";
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: Request) {
   const auth = await requireSuperAdmin(request);
   if (auth instanceof Response) return auth;
 
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: Request) {
   const auth = await requireSuperAdmin(request);
   if (auth instanceof Response) return auth;
 
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function PATCH(request: NextRequest) {
+async function handlePATCH(request: Request) {
   const auth = await requireSuperAdmin(request);
   if (auth instanceof Response) return auth;
 
@@ -105,3 +105,7 @@ export async function PATCH(request: NextRequest) {
     );
   }
 }
+
+export const GET = withPlatformRequest(handleGET);
+export const POST = withPlatformRequest(handlePOST);
+export const PATCH = withPlatformRequest(handlePATCH);

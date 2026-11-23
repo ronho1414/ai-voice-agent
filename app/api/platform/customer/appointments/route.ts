@@ -1,9 +1,9 @@
-import { NextRequest } from "next/server";
+import { withPlatformRequest } from "@/lib/platform/supabase-auth";
 import { requireCustomerAuth } from "@/lib/platform/auth";
 import { listAppointments, updateAppointmentStatus } from "@/lib/platform/store";
 import type { AppointmentStatus } from "@/lib/platform/types";
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: Request) {
   const auth = await requireCustomerAuth(request);
   if (auth instanceof Response) return auth;
 
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function PATCH(request: NextRequest) {
+async function handlePATCH(request: Request) {
   const auth = await requireCustomerAuth(request);
   if (auth instanceof Response) return auth;
 
@@ -37,6 +37,9 @@ export async function PATCH(request: NextRequest) {
     if (!body.appointmentId || !body.status) {
       return Response.json({ error: "Missing appointmentId or status" }, { status: 400 });
     }
+    if (typeof body.appointmentId !== "string" || !["pending", "confirmed", "rejected", "cancelled", "completed"].includes(body.status)) {
+      return Response.json({ error: "預約狀態不正確" }, { status: 400 });
+    }
 
     const updated = await updateAppointmentStatus(orgId, body.appointmentId, body.status);
     return Response.json({ success: true, appointment: updated });
@@ -47,3 +50,6 @@ export async function PATCH(request: NextRequest) {
     );
   }
 }
+
+export const GET = withPlatformRequest(handleGET);
+export const PATCH = withPlatformRequest(handlePATCH);

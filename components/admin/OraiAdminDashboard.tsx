@@ -37,6 +37,7 @@ export function OraiAdminDashboard() {
   const [ready, setReady] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("");
   const [tab, setTab] = useState<"overview" | "customers" | "agents" | "usage" | "system">("overview");
   const [overview, setOverview] = useState<SuperAdminOverview | null>(null);
   const [organizations, setOrganizations] = useState<OrgWithAgent[]>([]);
@@ -114,7 +115,7 @@ export function OraiAdminDashboard() {
       const res = await fetch("/api/platform/auth/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "super_admin", password }),
+        body: JSON.stringify({ type: "super_admin", email, password }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || "密碼錯誤");
@@ -128,8 +129,7 @@ export function OraiAdminDashboard() {
   }
 
   async function handleLogout() {
-    await fetch("/api/platform/auth/session", { method: "DELETE" });
-    setAuthenticated(false);
+    const res = await fetch("/api/platform/auth/session", { method: "DELETE" }); if (res.ok) setAuthenticated(false); else setError("登出失敗，請重試");
   }
 
   async function handleCreateOrg(e: FormEvent) {
@@ -245,6 +245,12 @@ export function OraiAdminDashboard() {
 
           <form onSubmit={handleLogin} className="mt-6 space-y-4">
             <div>
+              <label htmlFor="admin-email" className="mb-1.5 block text-xs font-bold text-[#52525B]">管理員電郵</label>
+              <input id="admin-email" type="email" autoComplete="username" required value={email}
+                onChange={(e) => setEmail(e.target.value)} placeholder="name@oraiservice.com"
+                className="w-full px-4 py-3 rounded-xl border border-[#E4E4E7] bg-[#FAFAFA] text-sm focus:outline-none focus:border-[#09090B]" />
+            </div>
+            <div>
               <label className="block text-xs font-bold text-[#52525B] uppercase mb-1.5" htmlFor="admin-pass">
                 總管理員密碼
               </label>
@@ -254,7 +260,8 @@ export function OraiAdminDashboard() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="請輸入 ADMIN_PASSWORD"
+                placeholder="請輸入 Supabase 帳戶密碼"
+                autoComplete="current-password"
                 className="w-full px-4 py-3 rounded-xl border border-[#E4E4E7] bg-[#FAFAFA] text-sm focus:outline-none focus:border-[#09090B]"
               />
             </div>
@@ -438,7 +445,7 @@ export function OraiAdminDashboard() {
               <div className="space-y-2 text-xs text-[#52525B] leading-relaxed">
                 <p>• <strong>新增商戶：</strong> 在「企業商戶」中輸入商戶全名、網址代稱 (Slug) 及行業類別（如美容院、美甲店、診所）。</p>
                 <p>• <strong>配置語音：</strong> 在「Agent 管理」中綁定該商戶專屬的 ElevenLabs Agent ID，前端語音元件將自動加載。</p>
-                <p>• <strong>客戶登入：</strong> 商戶管理員可在獨立入口 <code>/dashboard</code> 透過所屬商戶代稱直接登入，查閱專屬通話與預約紀錄。</p>
+                <p>• <strong>客戶登入：</strong> 商戶管理員在 <code>/dashboard</code> 使用電郵及密碼登入，帳戶必須具有有效商戶管理權限。</p>
               </div>
             </div>
           </div>
@@ -667,7 +674,9 @@ export function OraiAdminDashboard() {
                     : "本地持久化檔案 (Local Store)"}
                 </div>
                 <div className="mt-1 text-xs text-[#71717A]">
-                  支援多租戶 RLS 與 Organization 資料隔離
+                  {overview?.systemStatus.database === "connected_supabase"
+                    ? "使用 Supabase 專案資料庫"
+                    : "使用本機開發資料；尚未連接 Supabase"}
                 </div>
               </div>
 
@@ -689,10 +698,12 @@ export function OraiAdminDashboard() {
               <div className="p-5 rounded-2xl bg-white border border-[#E4E4E7] shadow-stripe-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-[#52525B] uppercase">檔案存儲空間</span>
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                  <span className={`w-2.5 h-2.5 rounded-full ${overview?.systemStatus.storage ? "bg-emerald-500" : "bg-amber-500"}`}></span>
                 </div>
-                <div className="mt-3 font-extrabold text-base">知識庫存儲正常</div>
-                <div className="mt-1 text-xs text-[#71717A]">支援 PDF / Word 檔案向量索引</div>
+                <div className="mt-3 font-extrabold text-base">
+                  {overview?.systemStatus.storage ? "已連接檔案儲存" : "未設定檔案儲存"}
+                </div>
+                <div className="mt-1 text-xs text-[#71717A]">檔案上載目前使用應用程式本機儲存流程</div>
               </div>
             </div>
           </div>

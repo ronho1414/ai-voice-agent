@@ -1,3 +1,4 @@
+import { withPlatformRequest } from "@/lib/platform/supabase-auth";
 import { requireAdmin } from "@/lib/admin/guard";
 import { readSiteId } from "@/lib/admin/site";
 import { createNote, deleteNote, listNotes, setNoteActive } from "@/lib/admin/store";
@@ -12,8 +13,8 @@ function siteFrom(request: Request): string {
   return readSiteId(new URL(request.url).searchParams.get("siteId"));
 }
 
-export async function GET(request: Request): Promise<Response> {
-  const denied = requireAdmin(request);
+async function handleGET(request: Request): Promise<Response> {
+  const denied = await requireAdmin(request);
   if (denied) return denied;
   try {
     return json(await listNotes(siteFrom(request)));
@@ -22,8 +23,8 @@ export async function GET(request: Request): Promise<Response> {
   }
 }
 
-export async function POST(request: Request): Promise<Response> {
-  const denied = requireAdmin(request);
+async function handlePOST(request: Request): Promise<Response> {
+  const denied = await requireAdmin(request);
   if (denied) return denied;
   try {
     const body = (await request.json()) as { text?: unknown; siteId?: unknown };
@@ -38,8 +39,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-export async function PATCH(request: Request): Promise<Response> {
-  const denied = requireAdmin(request);
+async function handlePATCH(request: Request): Promise<Response> {
+  const denied = await requireAdmin(request);
   if (denied) return denied;
   try {
     const body = (await request.json()) as { id?: unknown; isActive?: unknown; siteId?: unknown };
@@ -52,8 +53,8 @@ export async function PATCH(request: Request): Promise<Response> {
   }
 }
 
-export async function DELETE(request: Request): Promise<Response> {
-  const denied = requireAdmin(request);
+async function handleDELETE(request: Request): Promise<Response> {
+  const denied = await requireAdmin(request);
   if (denied) return denied;
   try {
     const id = new URL(request.url).searchParams.get("id")?.trim() ?? "";
@@ -64,3 +65,8 @@ export async function DELETE(request: Request): Promise<Response> {
     return fail(error);
   }
 }
+
+export const GET = withPlatformRequest(handleGET);
+export const POST = withPlatformRequest(handlePOST);
+export const PATCH = withPlatformRequest(handlePATCH);
+export const DELETE = withPlatformRequest(handleDELETE);

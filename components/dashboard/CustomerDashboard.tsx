@@ -1,24 +1,48 @@
 "use client";
 
-import { useEffect, useState, useCallback, type FormEvent } from "react";
+import { useEffect, useState, useCallback, type ChangeEvent, type FormEvent } from "react";
+import { BEAUTY_WINDOWS } from "@/lib/beauty/catalog";
 import type {
   Conversation,
   Appointment,
   CustomerOverview,
   AppointmentStatus,
+  KnowledgeSource,
+  SourceType,
 } from "@/lib/platform/types";
+
+type DashboardIconName = "overview" | "calls" | "appointments" | "knowledge" | "profile" | "agent";
+
+function DashboardIcon({ name, className = "h-5 w-5" }: { name: DashboardIconName; className?: string }) {
+  const common = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className={className} {...common}>
+      {name === "overview" && <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>}
+      {name === "calls" && <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.4 19.4 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 8.9a16 16 0 0 0 6 6l1.2-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.8 2.1Z"/>}
+      {name === "appointments" && <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18M9 15l2 2 4-4"/></>}
+      {name === "knowledge" && <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M4 5.5v13A2.5 2.5 0 0 1 6.5 16H20M8 7h8M8 10h7"/></>}
+      {name === "profile" && <><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18M10 12v2h4v-2"/></>}
+      {name === "agent" && <><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M9 13h.01M15 13h.01M9 17h6"/><circle cx="12" cy="3" r="1"/></>}
+    </svg>
+  );
+}
 
 export function CustomerDashboard() {
   const [ready, setReady] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
-  const [loginSlug, setLoginSlug] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
-  const [tab, setTab] = useState<"overview" | "calls" | "appointments" | "profile" | "agent">("overview");
+  const [tab, setTab] = useState<"overview" | "calls" | "appointments" | "knowledge" | "profile" | "agent">("overview");
 
   // Overview data
   const [overview, setOverview] = useState<CustomerOverview | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSource[]>([]);
+  const [knowledgeTitle, setKnowledgeTitle] = useState("");
+  const [knowledgeContent, setKnowledgeContent] = useState("");
+  const [knowledgeType, setKnowledgeType] = useState<SourceType>("faq");
+  const [editingKnowledge, setEditingKnowledge] = useState<{ id: string; title: string; content: string } | null>(null);
 
   // Profile Form State
   const [profName, setProfName] = useState("");
@@ -36,7 +60,9 @@ export function CustomerDashboard() {
     language_mode: string;
     is_connected: boolean;
     agent_id_preview?: string;
+    customer_instructions: string;
   } | null>(null);
+  const [agentInstructions, setAgentInstructions] = useState("");
 
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -76,6 +102,13 @@ export function CustomerDashboard() {
           setAppointments(body.appointments || []);
         }
       }
+      if (tab === "knowledge") {
+        const res = await fetch("/api/platform/customer/knowledge", { cache: "no-store" });
+        if (res.ok) {
+          const body = await res.json();
+          setKnowledgeSources(body.sources || []);
+        }
+      }
       if (tab === "profile") {
         const res = await fetch("/api/platform/customer/profile", { cache: "no-store" });
         if (res.ok) {
@@ -96,6 +129,7 @@ export function CustomerDashboard() {
         if (res.ok) {
           const body = await res.json();
           setAgentInfo(body.agent || null);
+          setAgentInstructions(body.agent?.customer_instructions || "");
         }
       }
     } catch (err) {
@@ -119,7 +153,7 @@ export function CustomerDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "customer",
-          slug: loginSlug,
+          email: loginEmail,
           password: loginPassword,
         }),
       });
@@ -134,23 +168,27 @@ export function CustomerDashboard() {
   }
 
   async function handleLogout() {
-    await fetch("/api/platform/auth/session", { method: "DELETE" });
-    setAuthenticated(false);
+    const res = await fetch("/api/platform/auth/session", { method: "DELETE" }); if (res.ok) setAuthenticated(false); else setError("登出失敗，請重試");
   }
 
   async function handleUpdateAppointmentStatus(appointmentId: string, status: AppointmentStatus) {
+    setBusy(`appointment_${appointmentId}`);
+    setError("");
     try {
       const res = await fetch("/api/platform/customer/appointments", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ appointmentId, status }),
       });
-      if (!res.ok) throw new Error("更新預約狀態失敗");
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "更新預約狀態失敗");
       setAppointments((prev) =>
         prev.map((a) => (a.id === appointmentId ? { ...a, status } : a))
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "更新預約狀態失敗");
+    } finally {
+      setBusy("");
     }
   }
 
@@ -175,7 +213,135 @@ export function CustomerDashboard() {
         }),
       });
       if (!res.ok) throw new Error("儲存商戶資料失敗");
-      setSuccessMsg("商戶營業資料已成功更新！語音專員將於下一次對話中即時應用。");
+      setSuccessMsg("商戶營業資料已成功更新。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "儲存失敗");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleAddKnowledge(e: FormEvent) {
+    e.preventDefault();
+    setBusy("knowledge_add");
+    setError("");
+    setSuccessMsg("");
+    try {
+      const res = await fetch("/api/platform/customer/knowledge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: knowledgeTitle, content: knowledgeContent, source_type: knowledgeType }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "新增知識失敗");
+      setKnowledgeSources((items) => [body.source, ...items]);
+      setKnowledgeTitle("");
+      setKnowledgeContent("");
+      setSuccessMsg("知識已儲存。ElevenLabs API 接駁後可同步至 AI 專員。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "新增知識失敗");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleUploadPdf(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setError("只可以上載 PDF 檔案");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError("PDF 檔案不可大於 10 MB");
+      return;
+    }
+    setBusy("knowledge_upload");
+    setError("");
+    setSuccessMsg("");
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      const res = await fetch("/api/platform/customer/knowledge", { method: "POST", body: form });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "PDF 上載失敗");
+      setKnowledgeSources((items) => [body.source, ...items]);
+      setSuccessMsg(`PDF 已上載並抽取 ${body.extractedCharacters.toLocaleString()} 個字元，已加入知識庫供日後同步至 ElevenLabs。`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "PDF 上載失敗");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleSaveKnowledge() {
+    if (!editingKnowledge) return;
+    setBusy("knowledge_save");
+    setError("");
+    try {
+      const res = await fetch("/api/platform/customer/knowledge", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editingKnowledge.id, title: editingKnowledge.title, content: editingKnowledge.content }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "更新知識失敗");
+      setKnowledgeSources((items) => items.map((item) => item.id === body.source.id ? body.source : item));
+      setEditingKnowledge(null);
+      setSuccessMsg("知識已更新，儲存內容已準備供 ElevenLabs 同步使用。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "更新知識失敗");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleToggleKnowledge(source: KnowledgeSource) {
+    try {
+      const res = await fetch("/api/platform/customer/knowledge", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: source.id, is_active: !source.is_active }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "更新知識狀態失敗");
+      setKnowledgeSources((items) => items.map((item) => item.id === source.id ? body.source : item));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "更新知識狀態失敗");
+    }
+  }
+
+  async function handleDeleteKnowledge(id: string) {
+    if (!window.confirm("確定刪除呢則知識？")) return;
+    try {
+      const res = await fetch("/api/platform/customer/knowledge", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "刪除知識失敗");
+      setKnowledgeSources((items) => items.filter((item) => item.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "刪除知識失敗");
+    }
+  }
+
+  async function handleSaveAgentInstructions(e: FormEvent) {
+    e.preventDefault();
+    setBusy("agent_save");
+    setError("");
+    setSuccessMsg("");
+    try {
+      const res = await fetch("/api/platform/customer/agent", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customer_instructions: agentInstructions }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "儲存 AI 專員指示失敗");
+      setSuccessMsg("AI 專員指示已儲存。ElevenLabs API 接駁後即可同步設定。");
     } catch (err) {
       setError(err instanceof Error ? err.message : "儲存失敗");
     } finally {
@@ -208,6 +374,10 @@ export function CustomerDashboard() {
             專為香港美容美甲、診所及中小企商戶打造的 AI 智能前台儀表板。
           </p>
 
+          <div className="mt-4 p-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 text-xs leading-relaxed">
+            使用 Orai 管理員為你建立嘅 Supabase Auth 電郵及密碼登入。帳戶必須已綁定有效商戶權限。
+          </div>
+
           {error && (
             <div className="mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
               {error}
@@ -216,17 +386,17 @@ export function CustomerDashboard() {
 
           <form onSubmit={handleLogin} className="mt-6 space-y-4">
             <div>
-              <label className="block text-xs font-bold text-[#52525B] uppercase mb-1.5" htmlFor="cust-slug">
-                商戶專屬代稱 (Slug)
+              <label className="block text-xs font-bold text-[#52525B] uppercase mb-1.5" htmlFor="cust-email">
+                登入電郵
               </label>
               <input
-                id="cust-slug"
-                type="text"
+                id="cust-email"
+                type="email"
                 required
-                placeholder="例如：glow-beauty"
-                value={loginSlug}
-                onChange={(e) => setLoginSlug(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-[#E4E4E7] bg-[#FAFAFA] text-sm font-mono focus:outline-none focus:border-[#09090B]"
+                placeholder="name@business.hk"
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-[#E4E4E7] bg-[#FAFAFA] text-sm focus:outline-none focus:border-[#09090B]"
               />
             </div>
 
@@ -290,6 +460,7 @@ export function CustomerDashboard() {
               tab === "overview" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
             }`}
           >
+            <DashboardIcon name="overview" />
             <span>營業總覽 (Overview)</span>
           </button>
 
@@ -300,6 +471,7 @@ export function CustomerDashboard() {
               tab === "calls" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
             }`}
           >
+            <DashboardIcon name="calls" />
             <span>通話紀錄 (Call History)</span>
           </button>
 
@@ -310,7 +482,19 @@ export function CustomerDashboard() {
               tab === "appointments" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
             }`}
           >
+            <DashboardIcon name="appointments" />
             <span>預約管理 (Appointments)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setTab("knowledge")}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
+              tab === "knowledge" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
+            }`}
+          >
+            <DashboardIcon name="knowledge" />
+            <span>知識庫及 FAQ</span>
           </button>
 
           <button
@@ -320,6 +504,7 @@ export function CustomerDashboard() {
               tab === "profile" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
             }`}
           >
+            <DashboardIcon name="profile" />
             <span>商戶資料 (Business Profile)</span>
           </button>
 
@@ -330,6 +515,7 @@ export function CustomerDashboard() {
               tab === "agent" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
             }`}
           >
+            <DashboardIcon name="agent" />
             <span>語音專員狀態 (Agent Info)</span>
           </button>
         </nav>
@@ -346,7 +532,11 @@ export function CustomerDashboard() {
       </aside>
 
       {/* Content Area */}
-      <main className="flex-1 p-6 sm:p-10 max-w-5xl">
+      <main className="flex-1 p-6 sm:p-10 max-w-6xl w-full">
+        <div className="mb-7 flex items-center justify-between gap-4">
+          <div className="font-bold text-base">Orai 客戶管理後台</div>
+          <span className="rounded-full bg-sky-100 px-3 py-1 text-[11px] font-bold text-sky-700">商戶專屬</span>
+        </div>
         {error && (
           <div className="mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
             {error}
@@ -370,39 +560,39 @@ export function CustomerDashboard() {
               </p>
             </header>
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-3xl">
               <div className="p-5 rounded-2xl bg-white border border-[#E4E4E7] shadow-stripe-sm">
-                <div className="text-xs font-bold text-[#52525B] uppercase">本月通話對話</div>
+                <DashboardIcon name="calls" className="h-5 w-5 text-[#09090B]" />
                 <div className="mt-2 text-3xl font-extrabold text-[#09090B]">
                   {overview?.monthlyConversations ?? 0}
                 </div>
-                <div className="mt-1 text-[11px] text-[#71717A]">位訪客完成諮詢</div>
+                <div className="mt-1 text-xs text-[#71717A]">本月接待通話</div>
               </div>
 
               <div className="p-5 rounded-2xl bg-white border border-[#E4E4E7] shadow-stripe-sm">
-                <div className="text-xs font-bold text-[#52525B] uppercase">累計通話分鐘</div>
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5 text-[#09090B]" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
                 <div className="mt-2 text-3xl font-extrabold text-[#09090B]">
                   {overview?.totalCallMinutes ?? 0}
                 </div>
-                <div className="mt-1 text-[11px] text-[#71717A]">分鐘真人級對答</div>
+                <div className="mt-1 text-xs text-[#71717A]">本月通話分鐘</div>
               </div>
 
               <div className="p-5 rounded-2xl bg-white border border-[#E4E4E7] shadow-stripe-sm">
-                <div className="text-xs font-bold text-[#52525B] uppercase">待確認預約</div>
-                <div className="mt-2 text-3xl font-extrabold text-amber-600">
-                  {overview?.pendingAppointments ?? 0}
+                <DashboardIcon name="appointments" className="h-5 w-5 text-[#09090B]" />
+                <div className="mt-2 text-3xl font-extrabold text-[#09090B]">
+                  {overview?.totalAppointments ?? 0}
                 </div>
-                <div className="mt-1 text-[11px] text-[#71717A]">
-                  總預約數：{overview?.totalAppointments ?? 0}
-                </div>
+                <div className="mt-1 text-xs text-[#71717A]">預約請求（{overview?.pendingAppointments ?? 0} 項待確認）</div>
               </div>
 
               <div className="p-5 rounded-2xl bg-white border border-[#E4E4E7] shadow-stripe-sm">
-                <div className="text-xs font-bold text-[#52525B] uppercase">語音前台專員</div>
-                <div className="mt-2 text-xl font-extrabold text-emerald-600">
-                  {overview?.agentStatus === "active" ? "24/7 在線" : "已暫停"}
+                <DashboardIcon name="agent" className="h-5 w-5 text-[#09090B]" />
+                <div className="mt-2 text-2xl font-extrabold text-[#09090B]">
+                  {overview?.agentStatus === "active"
+                    ? "已啟用"
+                    : overview?.agentStatus === "inactive" ? "已暫停" : "尚待設定"}
                 </div>
-                <div className="mt-1 text-[11px] text-[#71717A] truncate">
+                <div className="mt-1 text-xs text-[#71717A] truncate">
                   {overview?.agentName || "AI 專員"}
                 </div>
               </div>
@@ -509,14 +699,14 @@ export function CustomerDashboard() {
             <header>
               <h1 className="text-2xl font-extrabold tracking-tight">預約管理</h1>
               <p className="text-xs text-[#52525B] mt-1">
-                AI 前台自動收集的顧客預約時段、姓名與電話。
+                查看網站提交的預約要求，確認、拒絕或完成服務。所選時段須由店員再確認。
               </p>
             </header>
 
             {appointments.length === 0 ? (
               <div className="p-12 text-center rounded-2xl bg-white border border-[#E4E4E7]">
                 <p className="text-sm font-semibold text-[#52525B]">暫無預約申請</p>
-                <p className="text-xs text-[#71717A] mt-1">當訪客向 AI 語音專員提出預約需求時，顧客資料會自動整理於此表。</p>
+                <p className="text-xs text-[#71717A] mt-1">網站提交的預約要求會顯示喺呢度，由店員再確認時段。</p>
               </div>
             ) : (
               <div className="rounded-2xl border border-[#E4E4E7] bg-white overflow-hidden shadow-stripe-sm">
@@ -526,7 +716,7 @@ export function CustomerDashboard() {
                       <th className="p-4">顧客姓名</th>
                       <th className="p-4">聯絡電話</th>
                       <th className="p-4">預約項目</th>
-                      <th className="p-4">預約日期與時間</th>
+                      <th className="p-4">希望到訪時間（香港）</th>
                       <th className="p-4">狀態</th>
                       <th className="p-4 text-right">更改狀態</th>
                     </tr>
@@ -543,12 +733,15 @@ export function CustomerDashboard() {
                         <td className="p-4 font-semibold">{a.service_name || "待確認項目"}</td>
                         <td className="p-4 whitespace-nowrap text-[#52525B]">
                           {new Date(a.appointment_time).toLocaleString("zh-HK", {
+                            timeZone: "Asia/Hong_Kong",
                             month: "short",
                             day: "numeric",
                             weekday: "short",
                             hour: "2-digit",
                             minute: "2-digit",
                           })}
+                          {a.preferred_time_window && <div className="mt-1 text-[11px]">偏好：{BEAUTY_WINDOWS[a.preferred_time_window].label}</div>}
+                          {a.notes && <div className="mt-2 max-w-52 whitespace-pre-wrap text-[11px]">備註：{a.notes}</div>}
                         </td>
                         <td className="p-4">
                           <span
@@ -557,7 +750,7 @@ export function CustomerDashboard() {
                                 ? "bg-emerald-100 text-emerald-800"
                                 : a.status === "completed"
                                 ? "bg-slate-100 text-slate-700"
-                                : a.status === "cancelled"
+                                : a.status === "cancelled" || a.status === "rejected"
                                 ? "bg-rose-100 text-rose-700"
                                 : "bg-amber-100 text-amber-800"
                             }`}
@@ -568,36 +761,99 @@ export function CustomerDashboard() {
                               ? "已確認"
                               : a.status === "completed"
                               ? "已服務"
+                              : a.status === "rejected"
+                              ? "已拒絕"
                               : "已取消"}
                           </span>
                         </td>
                         <td className="p-4 text-right space-x-1.5 whitespace-nowrap">
-                          {a.status !== "confirmed" && (
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateAppointmentStatus(a.id, "confirmed")}
-                              className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold"
-                            >
-                              確認
-                            </button>
+                          {a.status === "pending" && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateAppointmentStatus(a.id, "confirmed")}
+                                disabled={busy === `appointment_${a.id}`}
+                                className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold disabled:opacity-50 transition-colors"
+                              >
+                                確認
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateAppointmentStatus(a.id, "rejected")}
+                                disabled={busy === `appointment_${a.id}`}
+                                className="px-2 py-1 rounded border border-rose-200 text-rose-700 text-[11px] font-bold hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                              >
+                                拒絕
+                              </button>
+                            </>
                           )}
-                          {a.status !== "completed" && (
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateAppointmentStatus(a.id, "completed")}
-                              className="px-2 py-1 rounded bg-[#09090B] hover:bg-[#27272A] text-white text-[11px] font-bold"
-                            >
-                              完成
-                            </button>
+                          {a.status === "confirmed" && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateAppointmentStatus(a.id, "completed")}
+                                disabled={busy === `appointment_${a.id}`}
+                                className="px-2 py-1 rounded bg-[#09090B] hover:bg-[#27272A] text-white text-[11px] font-bold disabled:opacity-50 transition-colors"
+                              >
+                                完成
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateAppointmentStatus(a.id, "rejected")}
+                                disabled={busy === `appointment_${a.id}`}
+                                className="px-2 py-1 rounded border border-rose-200 text-rose-700 text-[11px] font-bold hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                              >
+                                拒絕
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateAppointmentStatus(a.id, "cancelled")}
+                                disabled={busy === `appointment_${a.id}`}
+                                className="px-2 py-1 rounded border border-[#E4E4E7] text-rose-600 text-[11px] font-bold hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                              >
+                                取消
+                              </button>
+                            </>
                           )}
-                          {a.status !== "cancelled" && (
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateAppointmentStatus(a.id, "cancelled")}
-                              className="px-2 py-1 rounded border border-[#E4E4E7] text-rose-600 text-[11px] font-bold hover:bg-rose-50"
-                            >
-                              取消
-                            </button>
+                          {a.status === "completed" && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateAppointmentStatus(a.id, "confirmed")}
+                                disabled={busy === `appointment_${a.id}`}
+                                className="px-2 py-1 rounded border border-emerald-600 text-emerald-700 text-[11px] font-bold hover:bg-emerald-50 disabled:opacity-50 transition-colors"
+                              >
+                                返回確認
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateAppointmentStatus(a.id, "rejected")}
+                                disabled={busy === `appointment_${a.id}`}
+                                className="px-2 py-1 rounded border border-rose-200 text-rose-700 text-[11px] font-bold hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                              >
+                                拒絕
+                              </button>
+                            </>
+                          )}
+                          {(a.status === "rejected" || a.status === "cancelled") && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateAppointmentStatus(a.id, "confirmed")}
+                                disabled={busy === `appointment_${a.id}`}
+                                className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold disabled:opacity-50 transition-colors"
+                              >
+                                重新確認
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateAppointmentStatus(a.id, "pending")}
+                                disabled={busy === `appointment_${a.id}`}
+                                className="px-2 py-1 rounded border border-[#E4E4E7] text-[#52525B] text-[11px] font-bold hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                              >
+                                待確認
+                              </button>
+                            </>
                           )}
                         </td>
                       </tr>
@@ -606,6 +862,106 @@ export function CustomerDashboard() {
                 </table>
               </div>
             )}
+          </div>
+        )}
+
+        {/* KNOWLEDGE BASE TAB */}
+        {tab === "knowledge" && (
+          <div className="space-y-6">
+            <header>
+              <h1 className="text-2xl font-extrabold tracking-tight">知識庫及 FAQ</h1>
+              <p className="mt-1 text-xs text-[#52525B]">管理商戶資料、服務資訊及常見問題，作為 AI 專員日後同步至 ElevenLabs 的知識來源。</p>
+            </header>
+
+            <form onSubmit={handleAddKnowledge} className="space-y-4 rounded-2xl border border-[#E4E4E7] bg-white p-5 shadow-stripe-sm">
+              <div>
+                <h2 className="font-extrabold text-sm">新增知識</h2>
+                <p className="mt-1 text-[11px] text-[#71717A]">支援文字、FAQ 及 PDF 文件。</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-[1fr_180px]">
+                <input
+                  required maxLength={160} value={knowledgeTitle}
+                  onChange={(event) => setKnowledgeTitle(event.target.value)}
+                  placeholder="標題，例如：面部護理服務及價目"
+                  className="w-full rounded-xl border border-[#E4E4E7] px-4 py-2.5 text-sm focus:border-[#09090B] focus:outline-none"
+                />
+                <select value={knowledgeType} onChange={(event) => setKnowledgeType(event.target.value as SourceType)} className="rounded-xl border border-[#E4E4E7] bg-white px-3 py-2.5 text-sm">
+                  <option value="faq">常見問題 FAQ</option>
+                  <option value="note">一般文字資料</option>
+                </select>
+              </div>
+                <textarea
+                required maxLength={200000} rows={5} value={knowledgeContent}
+                onChange={(event) => setKnowledgeContent(event.target.value)}
+                placeholder="輸入服務詳情、價錢、預約規則或問答內容…"
+                className="w-full resize-y rounded-xl border border-[#E4E4E7] px-4 py-3 text-sm leading-relaxed focus:border-[#09090B] focus:outline-none"
+              />
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[11px] text-[#71717A]">最多 200,000 字元</span>
+                <button type="submit" disabled={busy === "knowledge_add"} className="rounded-xl bg-[#09090B] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#27272A] disabled:opacity-50">
+                  {busy === "knowledge_add" ? "儲存中…" : "新增至知識庫"}
+                </button>
+              </div>
+            </form>
+
+            <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-[#D4D4D8] bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <DashboardIcon name="knowledge" className="mt-0.5 h-5 w-5 shrink-0 text-[#52525B]" />
+                <div>
+                  <h2 className="text-sm font-extrabold">上載 PDF 文件</h2>
+                  <p className="mt-1 text-[11px] text-[#71717A]">系統會抽取 PDF 文字並加入知識庫；每個檔案最多 10 MB。</p>
+                </div>
+              </div>
+              <label className={`inline-flex cursor-pointer items-center justify-center rounded-xl border border-[#E4E4E7] px-4 py-2.5 text-xs font-bold hover:bg-[#FAFAFA] ${busy === "knowledge_upload" ? "pointer-events-none opacity-50" : ""}`}>
+                {busy === "knowledge_upload" ? "正在抽取 PDF…" : "選擇 PDF 上載"}
+                <input type="file" accept="application/pdf,.pdf" className="sr-only" disabled={busy === "knowledge_upload"} onChange={handleUploadPdf} />
+              </label>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="font-extrabold text-sm">已儲存內容</h2>
+                <span className="text-[11px] text-[#71717A]">{knowledgeSources.length} 項</span>
+              </div>
+              {knowledgeSources.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-[#D4D4D8] bg-white p-10 text-center">
+                  <DashboardIcon name="knowledge" className="mx-auto h-8 w-8 text-[#A1A1AA]" />
+                  <p className="mt-3 text-sm font-semibold text-[#52525B]">知識庫暫時未有內容</p>
+                  <p className="mt-1 text-xs text-[#71717A]">新增 FAQ 或商戶資料，方便日後接駁 AI 專員。</p>
+                </div>
+              ) : knowledgeSources.map((source) => (
+                <article key={source.id} className={`rounded-2xl border bg-white p-5 shadow-stripe-sm ${source.is_active ? "border-[#E4E4E7]" : "border-dashed border-[#D4D4D8] opacity-70"}`}>
+                  {editingKnowledge?.id === source.id ? (
+                    <div className="space-y-3">
+                      <input value={editingKnowledge.title} onChange={(event) => setEditingKnowledge({ ...editingKnowledge, title: event.target.value })} className="w-full rounded-lg border border-[#E4E4E7] px-3 py-2 text-sm" />
+                      <textarea rows={6} maxLength={200000} value={editingKnowledge.content} onChange={(event) => setEditingKnowledge({ ...editingKnowledge, content: event.target.value })} className="w-full rounded-lg border border-[#E4E4E7] px-3 py-2 text-sm leading-relaxed" />
+                      <div className="flex justify-end gap-2">
+                        <button type="button" onClick={() => setEditingKnowledge(null)} className="rounded-lg border border-[#E4E4E7] px-3 py-2 text-xs font-semibold">取消</button>
+                        <button type="button" onClick={handleSaveKnowledge} disabled={busy === "knowledge_save"} className="rounded-lg bg-[#09090B] px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{busy === "knowledge_save" ? "儲存中…" : "儲存修改"}</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-bold text-sm">{source.title}</h3>
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-[#52525B]">{source.source_type === "faq" ? "FAQ" : "文字資料"}</span>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${source.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{source.is_active ? "啟用" : "已停用"}</span>
+                          </div>
+                          <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-[#52525B]">{source.content.length > 700 ? `${source.content.slice(0, 700)}…` : source.content}</p>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-[#F4F4F5] pt-3">
+                        <button type="button" onClick={() => handleToggleKnowledge(source)} className="rounded-lg border border-[#E4E4E7] px-3 py-2 text-[11px] font-semibold">{source.is_active ? "停用" : "重新啟用"}</button>
+                        <button type="button" onClick={() => setEditingKnowledge({ id: source.id, title: source.title, content: source.content })} className="rounded-lg border border-[#E4E4E7] px-3 py-2 text-[11px] font-semibold">編輯</button>
+                        <button type="button" onClick={() => handleDeleteKnowledge(source.id)} className="rounded-lg border border-rose-200 px-3 py-2 text-[11px] font-semibold text-rose-700">刪除</button>
+                      </div>
+                    </>
+                  )}
+                </article>
+              ))}
+            </div>
           </div>
         )}
 
@@ -752,9 +1108,30 @@ export function CustomerDashboard() {
               </div>
 
               <div className="p-4 rounded-2xl bg-[#FAFAFA] border border-[#E4E4E7] text-[11px] text-[#71717A] leading-relaxed">
-                如需更改 AI 專員聲線或自訂回答規則，請聯絡 Orai 客服顧問協助微調模型與提示詞。
+                商戶可自行編輯 AI 專員的回答指示。聲線及 ElevenLabs Agent ID 仍由管理員設定。
               </div>
             </div>
+
+            <form onSubmit={handleSaveAgentInstructions} className="max-w-2xl space-y-4 rounded-3xl border border-[#E4E4E7] bg-white p-6 shadow-stripe-sm">
+              <div>
+                <h2 className="font-extrabold text-base">AI 專員回答指示</h2>
+                <p className="mt-1 text-xs leading-relaxed text-[#71717A]">描述語氣、回答方式、服務重點或需要避免的內容。現階段會安全儲存到商戶設定；接駁 ElevenLabs API 後再同步到 Agent。</p>
+              </div>
+              <textarea
+                rows={9}
+                maxLength={20000}
+                value={agentInstructions}
+                onChange={(event) => setAgentInstructions(event.target.value)}
+                placeholder={"例如：\n請以親切、專業的香港廣東話回答。\n先了解客人需要，再介紹合適服務。\n未能確認價錢或預約時，請邀請客人聯絡店舖。"}
+                className="w-full resize-y rounded-xl border border-[#E4E4E7] px-4 py-3 text-sm leading-relaxed focus:border-[#09090B] focus:outline-none"
+              />
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[11px] text-[#71717A]">{agentInstructions.length.toLocaleString()} / 20,000 字元</span>
+                <button type="submit" disabled={busy === "agent_save"} className="rounded-xl bg-[#09090B] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#27272A] disabled:opacity-50">
+                  {busy === "agent_save" ? "儲存中…" : "儲存 AI 指示"}
+                </button>
+              </div>
+            </form>
           </div>
         )}
       </main>

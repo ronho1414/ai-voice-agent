@@ -1,0 +1,14 @@
+---
+description: Require independent Orai test-runner verification and wait for its results before every implementation delivery
+alwaysApply: true
+---
+
+# Independent verification gate
+
+- Follow the independent testing gate in root `AGENTS.md`.
+- Delegate relevant existing checks to `.cursor/agents/orai-test-runner.md` before
+  handing off implemented changes, and wait for the result.
+- Fix failures, then request an independent rerun before claiming completion.
+- Coordinate `.next` ownership; never overlap build/dev/type generation.
+- Report passed, failed and not-verified items separately, including warnings.
+- Tests do not authorize hosted database mutations or deployment.

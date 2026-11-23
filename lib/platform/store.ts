@@ -11,7 +11,8 @@ import type {
   Appointment,
   UsageRecord,
   AppointmentStatus,
-  OrganizationStatus
+  SuperAdminOverview,
+  CustomerOverview
 } from "./types";
 
 export type PlatformDataStore = {
@@ -28,7 +29,7 @@ export type PlatformDataStore = {
 function supabaseAdmin(): SupabaseClient | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!url || !key) return null;
+  if (!url || !key) { if (process.env.NODE_ENV === "production") throw new Error("Platform database is not configured"); return null; }
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -40,122 +41,9 @@ function storePath(): string {
 
 let memoryCache: PlatformDataStore | null = null;
 
-const INITIAL_SEED: PlatformDataStore = {
-  organizations: [
-    {
-      id: "b1a2c3d4-0001-4000-8000-000000000001",
-      name: "GLOW 專業美甲與日式美睫沙龍",
-      slug: "glow-beauty",
-      industry: "nail_studio",
-      status: "active",
-      phone: "+852 9876 5432",
-      email: "booking@glowbeauty.hk",
-      address: "香港尖沙咀廣東道海港城對面 3 樓",
-      opening_hours: {
-        mon_fri: "11:00 - 20:30",
-        sat_sun: "10:30 - 19:30",
-        notes: "敬請提前至少 1 天預約",
-      },
-      created_at: "2026-11-20T10:00:00.000Z",
-      updated_at: "2026-11-20T10:00:00.000Z",
-    },
-  ],
-  profiles: [
-    {
-      id: "c1a2c3d4-0001-4000-8000-000000000001",
-      email: "booking@glowbeauty.hk",
-      full_name: "GLOW 店長 Kelly",
-      phone: "+852 9876 5432",
-      system_role: "user",
-      created_at: "2026-11-20T10:00:00.000Z",
-      updated_at: "2026-11-20T10:00:00.000Z",
-    },
-  ],
-  members: [
-    {
-      id: "d1a2c3d4-0001-4000-8000-000000000001",
-      organization_id: "b1a2c3d4-0001-4000-8000-000000000001",
-      profile_id: "c1a2c3d4-0001-4000-8000-000000000001",
-      role: "customer_admin",
-      is_active: true,
-      created_at: "2026-11-20T10:00:00.000Z",
-      updated_at: "2026-11-20T10:00:00.000Z",
-    },
-  ],
-  agents: [
-    {
-      id: "e1a2c3d4-0001-4000-8000-000000000001",
-      organization_id: "b1a2c3d4-0001-4000-8000-000000000001",
-      elevenlabs_agent_id: "agent_8201m7sbetj3e36s1a2nv3fgcqna",
-      name: "GLOW 智能美甲前台",
-      voice_name: "Cantonese Female",
-      language_mode: "trilingual",
-      status: "active",
-      config: {},
-      created_at: "2026-11-20T10:00:00.000Z",
-      updated_at: "2026-11-20T10:00:00.000Z",
-    },
-  ],
-  knowledge_sources: [
-    {
-      id: "f1a2c3d4-0001-4000-8000-000000000001",
-      organization_id: "b1a2c3d4-0001-4000-8000-000000000001",
-      title: "2026_GLOW美甲與美睫試做價目表.pdf",
-      source_type: "pdf",
-      content:
-        "日式單色凝膠新客試做價 HK$380，漸變暈染 HK$480。日式美睫單根嫁接 HK$580。卸甲服務舊客免費，非本店卸甲 HK$100。",
-      file_size: 1843200,
-      is_active: true,
-      created_at: "2026-11-20T10:00:00.000Z",
-      updated_at: "2026-11-20T10:00:00.000Z",
-    },
-  ],
-  conversations: [
-    {
-      id: "a1b2c3d4-0001-4000-8000-000000000001",
-      organization_id: "b1a2c3d4-0001-4000-8000-000000000001",
-      session_id: "sess_20261122_01",
-      channel: "web",
-      caller_phone: "+852 9123 4567",
-      caller_name: "Chloe Wong",
-      duration_seconds: 84,
-      user_transcript:
-        "你好呀，我想問下日式單色美甲第一次試做幾多錢？星期六下晝有無位？",
-      ai_reply:
-        "你好 Chloe！第一次試做日式單色凝膠美甲優惠價係 HK$380 全包包基本修甲。今個星期六下午 3 點同 5 點仲有位，要唔要我幫你登記留位？",
-      summary: "查詢新客單色美甲試做價及星期六下午預約",
-      detected_intent: "預約時段查詢",
-      is_high_intent: true,
-      status: "completed",
-      created_at: "2026-11-22T14:32:00.000Z",
-    },
-  ],
-  appointments: [
-    {
-      id: "91a2c3d4-0001-4000-8000-000000000001",
-      organization_id: "b1a2c3d4-0001-4000-8000-000000000001",
-      conversation_id: "a1b2c3d4-0001-4000-8000-000000000001",
-      customer_name: "Chloe Wong",
-      customer_phone: "+852 9123 4567",
-      service_name: "日式單色凝膠美甲（新客試做）",
-      appointment_time: "2026-11-28T15:00:00.000Z",
-      notes: "指明想做奶茶裸色，需卸舊甲",
-      status: "pending",
-      created_at: "2026-11-22T14:35:00.000Z",
-      updated_at: "2026-11-22T14:35:00.000Z",
-    },
-  ],
-  usage_records: [
-    {
-      id: "81a2c3d4-0001-4000-8000-000000000001",
-      organization_id: "b1a2c3d4-0001-4000-8000-000000000001",
-      billing_period: "2026-11",
-      call_minutes: 18.5,
-      conversation_count: 14,
-      recorded_at: "2026-11-22T23:59:59.000Z",
-      created_at: "2026-11-22T23:59:59.000Z",
-    },
-  ],
+const EMPTY_STORE: PlatformDataStore = {
+  organizations: [], profiles: [], members: [], agents: [], knowledge_sources: [],
+  conversations: [], appointments: [], usage_records: [],
 };
 
 async function loadLocalStore(): Promise<PlatformDataStore> {
@@ -164,7 +52,7 @@ async function loadLocalStore(): Promise<PlatformDataStore> {
     const raw = await readFile(storePath(), "utf8");
     memoryCache = JSON.parse(raw) as PlatformDataStore;
   } catch {
-    memoryCache = JSON.parse(JSON.stringify(INITIAL_SEED)) as PlatformDataStore;
+    memoryCache = EMPTY_STORE;
     await saveLocalStore(memoryCache);
   }
   return memoryCache;
@@ -212,6 +100,44 @@ export async function getOrganizationById(id: string): Promise<Organization | nu
   }
   const store = await loadLocalStore();
   return store.organizations.find((o) => o.id === id) ?? null;
+}
+
+export async function getCustomerAccountByUserId(userId: string) {
+  const sb = supabaseAdmin();
+  if (!sb) return null;
+  const { data: profile, error: profileError } = await sb
+    .from("profiles").select("id,email,full_name").eq("id", userId).maybeSingle();
+  if (profileError) throw new Error(profileError.message);
+  if (!profile) return null;
+  const { data: member, error: memberError } = await sb
+    .from("organization_members")
+    .select("organization_id,role,is_active,organizations(id,name,slug,status)")
+    .eq("profile_id", userId).eq("is_active", true).eq("role", "customer_admin")
+    .maybeSingle();
+  if (memberError) throw new Error(memberError.message);
+  const org = Array.isArray(member?.organizations) ? member.organizations[0] : member?.organizations;
+  if (!member || !org || org.status !== "active") return null;
+  return {
+    userId: profile.id,
+    email: profile.email,
+    fullName: profile.full_name,
+    role: "customer_admin" as const,
+    organizationId: member.organization_id,
+    organizationName: org.name,
+    organizationSlug: org.slug,
+  };
+}
+
+export async function isActiveCustomerMember(userId: string, organizationId: string): Promise<boolean> {
+  const sb = supabaseAdmin();
+  if (!sb) return false;
+  const { data, error } = await sb.from("organization_members")
+    .select("organization_id,organizations(status)")
+    .eq("profile_id", userId).eq("organization_id", organizationId)
+    .eq("role", "customer_admin").eq("is_active", true).maybeSingle();
+  if (error) throw new Error(error.message);
+  const org = Array.isArray(data?.organizations) ? data.organizations[0] : data?.organizations;
+  return Boolean(data && org?.status === "active");
 }
 
 export async function getOrganizationBySlug(slug: string): Promise<Organization | null> {
@@ -267,7 +193,7 @@ export async function createOrganization(input: {
     name: `${newOrg.name} 語音專員`,
     voice_name: "Cantonese Female",
     language_mode: "trilingual",
-    status: "active",
+    status: input.elevenlabsAgentId?.trim() ? "active" : "draft",
     config: {},
     created_at: now,
     updated_at: now,
@@ -376,7 +302,7 @@ export async function upsertAgent(
         name: input.name?.trim() || "AI 專員",
         voice_name: "Cantonese Female",
         language_mode: "trilingual",
-        status: input.status || "active",
+        status: input.status || (input.elevenlabsAgentId.trim() ? "active" : "draft"),
         config: {},
         created_at: now,
         updated_at: now,
@@ -407,7 +333,7 @@ export async function upsertAgent(
       name: input.name?.trim() || "AI 專員",
       voice_name: "Cantonese Female",
       language_mode: "trilingual",
-      status: input.status || "active",
+      status: input.status || (input.elevenlabsAgentId.trim() ? "active" : "draft"),
       config: {},
       created_at: now,
       updated_at: now,
@@ -416,6 +342,139 @@ export async function upsertAgent(
     await saveLocalStore(store);
     return newAgent;
   }
+}
+
+export async function updateAgentInstructions(
+  organizationId: string,
+  instructions: string
+): Promise<Agent> {
+  const existing = await getAgentByOrgId(organizationId);
+  const now = new Date().toISOString();
+  if (!existing) {
+    await upsertAgent(organizationId, { elevenlabsAgentId: "", status: "draft" });
+    return updateAgentInstructions(organizationId, instructions);
+  }
+
+  const config = { ...(existing.config || {}), customer_instructions: instructions };
+  const sb = supabaseAdmin();
+  if (sb) {
+    const { data, error } = await sb
+      .from("agents")
+      .update({ config, updated_at: now })
+      .eq("id", existing.id)
+      .eq("organization_id", organizationId)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  }
+
+  const store = await loadLocalStore();
+  const index = store.agents.findIndex((agent) => agent.id === existing.id && agent.organization_id === organizationId);
+  if (index < 0) throw new Error("Agent not found");
+  store.agents[index] = { ...store.agents[index], config, updated_at: now };
+  await saveLocalStore(store);
+  return store.agents[index];
+}
+
+// -----------------------------------------------------------------------------
+// Knowledge Sources
+// -----------------------------------------------------------------------------
+export async function listKnowledgeSources(organizationId: string): Promise<KnowledgeSource[]> {
+  const sb = supabaseAdmin();
+  if (sb) {
+    const { data, error } = await sb
+      .from("knowledge_sources")
+      .select("*")
+      .eq("organization_id", organizationId)
+      .order("updated_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  }
+  const store = await loadLocalStore();
+  return store.knowledge_sources
+    .filter((source) => source.organization_id === organizationId)
+    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+}
+
+export async function createKnowledgeSource(input: {
+  organizationId: string;
+  title: string;
+  content: string;
+  sourceType: KnowledgeSource["source_type"];
+  fileSize?: number;
+}): Promise<KnowledgeSource> {
+  const now = new Date().toISOString();
+  const source: KnowledgeSource = {
+    id: crypto.randomUUID(),
+    organization_id: input.organizationId,
+    title: input.title.trim(),
+    content: input.content,
+    source_type: input.sourceType,
+    file_size: input.fileSize ?? new TextEncoder().encode(input.content).length,
+    is_active: true,
+    created_at: now,
+    updated_at: now,
+  };
+  const sb = supabaseAdmin();
+  if (sb) {
+    const { data, error } = await sb.from("knowledge_sources").insert(source).select().single();
+    if (error) throw new Error(error.message);
+    return data;
+  }
+  const store = await loadLocalStore();
+  store.knowledge_sources.push(source);
+  await saveLocalStore(store);
+  return source;
+}
+
+export async function updateKnowledgeSource(
+  organizationId: string,
+  id: string,
+  updates: Partial<Pick<KnowledgeSource, "title" | "content" | "source_type" | "is_active">>
+): Promise<KnowledgeSource> {
+  const now = new Date().toISOString();
+  const values = {
+    ...updates,
+    ...(updates.content !== undefined ? { file_size: new TextEncoder().encode(updates.content).length } : {}),
+    updated_at: now,
+  };
+  const sb = supabaseAdmin();
+  if (sb) {
+    const { data, error } = await sb
+      .from("knowledge_sources")
+      .update(values)
+      .eq("id", id)
+      .eq("organization_id", organizationId)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  }
+  const store = await loadLocalStore();
+  const index = store.knowledge_sources.findIndex((source) => source.id === id && source.organization_id === organizationId);
+  if (index < 0) throw new Error("Knowledge source not found");
+  store.knowledge_sources[index] = { ...store.knowledge_sources[index], ...values };
+  await saveLocalStore(store);
+  return store.knowledge_sources[index];
+}
+
+export async function deleteKnowledgeSource(organizationId: string, id: string): Promise<void> {
+  const sb = supabaseAdmin();
+  if (sb) {
+    const { error } = await sb
+      .from("knowledge_sources")
+      .delete()
+      .eq("id", id)
+      .eq("organization_id", organizationId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  const store = await loadLocalStore();
+  store.knowledge_sources = store.knowledge_sources.filter(
+    (source) => !(source.id === id && source.organization_id === organizationId)
+  );
+  await saveLocalStore(store);
 }
 
 // -----------------------------------------------------------------------------
@@ -479,11 +538,16 @@ export async function updateAppointmentStatus(
   const now = new Date().toISOString();
   const sb = supabaseAdmin();
   if (sb) {
+    const { data: current, error: currentError } = await sb.from("appointments")
+      .select("status").eq("id", appointmentId).eq("organization_id", organizationId).maybeSingle();
+    if (currentError || !current) throw new Error("找不到預約或沒有操作權限");
+    assertAppointmentTransition(current.status, status);
     const { data, error } = await sb
       .from("appointments")
       .update({ status, updated_at: now })
       .eq("id", appointmentId)
       .eq("organization_id", organizationId)
+      .eq("status", current.status)
       .select()
       .single();
     if (error) throw new Error(error.message);
@@ -495,6 +559,7 @@ export async function updateAppointmentStatus(
     (a) => a.id === appointmentId && a.organization_id === organizationId
   );
   if (index === -1) throw new Error("Appointment not found");
+  assertAppointmentTransition(store.appointments[index].status, status);
 
   store.appointments[index] = {
     ...store.appointments[index],
@@ -503,6 +568,17 @@ export async function updateAppointmentStatus(
   };
   await saveLocalStore(store);
   return store.appointments[index];
+}
+
+function assertAppointmentTransition(current: AppointmentStatus, next: AppointmentStatus): void {
+  const transitions: Record<AppointmentStatus, AppointmentStatus[]> = {
+    pending: ["confirmed", "rejected", "cancelled"],
+    confirmed: ["completed", "rejected", "cancelled", "pending"],
+    completed: ["confirmed", "rejected", "cancelled", "pending"],
+    rejected: ["confirmed", "pending", "cancelled"],
+    cancelled: ["confirmed", "pending", "rejected"],
+  };
+  if (current !== next && !transitions[current]?.includes(next)) throw new Error("此預約不能轉換至所選狀態");
 }
 
 // -----------------------------------------------------------------------------
@@ -542,18 +618,6 @@ export async function listAllUsageRecords(): Promise<UsageRecord[]> {
 // -----------------------------------------------------------------------------
 // Super Admin Overview Aggregations
 // -----------------------------------------------------------------------------
-export type SuperAdminOverview = {
-  totalCustomers: number;
-  activeCustomers: number;
-  totalConversations: number;
-  totalUsageMinutes: number;
-  systemStatus: {
-    database: "connected_supabase" | "local_store";
-    elevenlabsApi: boolean;
-    storage: boolean;
-  };
-};
-
 export async function getSuperAdminOverview(): Promise<SuperAdminOverview> {
   const orgs = await listOrganizations();
   const totalConversations = await countAllConversations();
@@ -574,7 +638,7 @@ export async function getSuperAdminOverview(): Promise<SuperAdminOverview> {
     systemStatus: {
       database: hasSupabase ? "connected_supabase" : "local_store",
       elevenlabsApi: Boolean(process.env.ELEVENLABS_API_KEY?.trim()),
-      storage: true,
+      storage: false,
     },
   };
 }
@@ -582,16 +646,6 @@ export async function getSuperAdminOverview(): Promise<SuperAdminOverview> {
 // -----------------------------------------------------------------------------
 // Customer Overview Aggregations
 // -----------------------------------------------------------------------------
-export type CustomerOverview = {
-  organization: Organization;
-  monthlyConversations: number;
-  totalCallMinutes: number;
-  pendingAppointments: number;
-  totalAppointments: number;
-  agentStatus: Agent["status"];
-  agentName: string;
-};
-
 export async function getCustomerOverview(organizationId: string): Promise<CustomerOverview | null> {
   const org = await getOrganizationById(organizationId);
   if (!org) return null;
@@ -604,9 +658,12 @@ export async function getCustomerOverview(organizationId: string): Promise<Custo
   const currentPeriod = new Date().toISOString().slice(0, 7); // e.g. "2026-11"
   const currentUsage = usage.find((u) => u.billing_period === currentPeriod);
 
-  const monthlyConversations = currentUsage?.conversation_count ?? convs.length;
-  const totalCallMinutes = currentUsage?.call_minutes ?? 
-    Math.round(convs.reduce((acc, c) => acc + c.duration_seconds, 0) / 60);
+  const currentMonthConversations = convs.filter((conversation) =>
+    conversation.created_at.startsWith(currentPeriod)
+  );
+  const monthlyConversations = currentUsage?.conversation_count ?? currentMonthConversations.length;
+  const totalCallMinutes = currentUsage?.call_minutes ??
+    Math.round(currentMonthConversations.reduce((acc, c) => acc + c.duration_seconds, 0) / 60);
 
   return {
     organization: org,

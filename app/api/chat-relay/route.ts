@@ -1,13 +1,12 @@
 import { after } from "next/server";
 import { readConversationDraft, recordConversation } from "@/lib/admin/logs";
-import { resolveSpokenKnowledge } from "@/lib/admin/knowledge";
-import { readSiteId } from "@/lib/admin/site";
+import { DEFAULT_SITE_ID, readSiteId } from "@/lib/admin/site";
 import { fail } from "@/lib/http";
 import { voiceFor } from "@/lib/voice-engine/clips-config";
 import { decideOpener } from "@/lib/voice-engine/decision";
 import { openFlashStream } from "@/lib/voice-engine/elevenlabs";
 import { buildSystemPrompt, guardReply } from "@/lib/voice-engine/prompt";
-import { loadClipsConfig } from "@/lib/voice-engine/read-config";
+import { loadClipsConfig, loadKnowledgeFile } from "@/lib/voice-engine/read-config";
 import { firstClause, replyComplete, streamReplyDeltas } from "@/lib/voice-engine/stream-reply";
 import { readKnowledgeBasePath, readSpokenOpener, readTurnContext, readUtterance, readVoiceId } from "@/lib/voice-engine/utterance";
 import type { VoiceSetting } from "@/lib/voice-engine/clips-config";
@@ -78,11 +77,12 @@ export async function POST(request: Request): Promise<Response> {
         );
         const spoken = readSpokenOpener(body);
         const opener = spoken ?? (await decideOpener(text, readTurnContext(body)));
-        const resolved = await resolveSpokenKnowledge(
-          text,
-          siteId,
-          knowledgeBasePath ?? "knowledge-base/company-info.md",
-        );
+        // Public demo material is separate from private merchant knowledge.
+        if (siteId !== DEFAULT_SITE_ID) throw new Error("Tenant voice access is not enabled");
+        const resolved = {
+          knowledge: loadKnowledgeFile(knowledgeBasePath ?? "knowledge-base/company-info.md"),
+          useAdminSources: false,
+        };
         const configured = voiceFor(loadClipsConfig(), opener.lang);
         const voiceId = readVoiceId(body);
         const voice = voiceId ? { ...configured, voiceId } : configured;

@@ -1,8 +1,8 @@
-import { NextRequest } from "next/server";
+import { withPlatformRequest } from "@/lib/platform/supabase-auth";
 import { requireCustomerAuth } from "@/lib/platform/auth";
 import { getCustomerOverview } from "@/lib/platform/store";
 
-export async function GET(request: NextRequest) {
+async function handleGET(request: Request) {
   const auth = await requireCustomerAuth(request);
   if (auth instanceof Response) return auth;
 
@@ -22,3 +22,5 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
+export const GET = withPlatformRequest(handleGET);

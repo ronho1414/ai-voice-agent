@@ -1,55 +1,7 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+// Legacy shared-password cookies are no longer accepted.
+export { authConfigured as adminConfigured } from "@/lib/platform/supabase-auth";
+import { getPlatformSession } from "@/lib/platform/auth";
 
-export const ADMIN_COOKIE = "vp_admin";
-const COOKIE_MAX_AGE = 60 * 60 * 12;
-
-export function adminConfigured(): boolean {
-  return Boolean(process.env.ADMIN_PASSWORD?.trim());
-}
-
-function digest(value: string): Buffer {
-  return createHash("sha256").update(value).digest();
-}
-
-export function passwordMatches(input: string): boolean {
-  const expected = process.env.ADMIN_PASSWORD?.trim() ?? "";
-  if (!expected || !input) return false;
-  return timingSafeEqual(digest(input), digest(expected));
-}
-
-function sessionToken(): string | null {
-  const password = process.env.ADMIN_PASSWORD?.trim();
-  if (!password) return null;
-  return createHmac("sha256", password).update("voicepilot-admin-v1").digest("base64url");
-}
-
-export function readAdminCookie(request: Request): string {
-  const header = request.headers.get("cookie") ?? "";
-  for (const part of header.split(";")) {
-    const [name, ...rest] = part.trim().split("=");
-    if (name === ADMIN_COOKIE) return decodeURIComponent(rest.join("="));
-  }
-  return "";
-}
-
-export function isAdminRequest(request: Request): boolean {
-  const expected = sessionToken();
-  if (!expected) return false;
-  const actual = readAdminCookie(request);
-  if (!actual) return false;
-  const left = Buffer.from(actual);
-  const right = Buffer.from(expected);
-  if (left.length !== right.length) return false;
-  return timingSafeEqual(left, right);
-}
-
-function cookieSuffix(maxAge: number): string {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
-}
-
-export function adminCookie(authenticated: boolean): string {
-  if (!authenticated) return `${ADMIN_COOKIE}=; ${cookieSuffix(0)}`;
-  const token = sessionToken() ?? "";
-  return `${ADMIN_COOKIE}=${encodeURIComponent(token)}; ${cookieSuffix(COOKIE_MAX_AGE)}`;
+export async function isAdminRequest(request: Request): Promise<boolean> {
+  return (await getPlatformSession(request))?.role === "super_admin";
 }
