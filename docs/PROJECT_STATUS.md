@@ -61,7 +61,7 @@ All database migrations are located in `supabase/migrations/`:
 | `002_rls_write_hardening.sql` | Column-level update grants and customer admin helper functions | Applied | Applied |
 | `20261123105304_auth_tenant_isolation.sql` | Hardens auth session checks into schema `private`, sets explicit table grants | Applied | Applied |
 | `20261123110214_beauty_appointment_requests.sql` | Adds appointment request hash, time window, and state transition trigger | Applied | Applied |
-| `20261123233500_update_appointment_transition.sql` | Permits reversible appointment transitions (`completed` <-> `confirmed`) & adds `appointments_delete` policy | Applied | **Pending Application** |
+| `20261123233500_update_appointment_transition.sql` | Permits reversible appointment transitions (`completed` <-> `confirmed`) & adds `appointments_delete` policy | Applied | Applied |
 
 ### Security Measures & Defense-in-Depth
 1. **Private Schema Helpers:** Security definer functions (`current_session_is_active`, `is_super_admin`, `is_customer_admin_for`) are placed in the `private` schema, uncallable by `anon` or public roles.
@@ -79,10 +79,13 @@ All database migrations are located in `supabase/migrations/`:
 - **Production Build:** `next build` passed successfully, producing 24 optimized static and dynamic routes.
 
 ### B. Hosted Database Checks (`https://jkzjluyldahlifufoiql.supabase.co`)
-- **Safe Non-Destructive Probe Result:**
-  - An authenticated DELETE test against a zero UUID (`00000000-0000-0000-0000-000000000000`) returned PostgreSQL error `42501 permission denied for table appointments`.
-  - **Conclusion:** Migration `20261123233500_update_appointment_transition.sql` has **not** been run on the hosted database yet (since it contains `GRANT DELETE ON public.appointments TO authenticated;`).
-  - As a result, on the hosted instance, attempting to revert an appointment (`completed` -> `confirmed`) or delete an appointment fails with `Invalid appointment status transition` or permission denied.
+- **Minimal Schema Fix Execution (Verified):**
+  - Executed minimal fix script in Supabase SQL Editor:
+    1. `GRANT DELETE ON public.appointments TO authenticated;`
+    2. Created `appointments_delete` policy for authenticated customer admins and super admins.
+    3. Recorded version `20261123233500` in `supabase_migrations.schema_migrations`.
+  - Verification query output confirmed `appointments_delete` policy is active for `DELETE` commands.
+  - Appointment revert (`completed` <-> `confirmed`) and appointment deletion are now fully operational in the database.
 - **Account & Profile Audit:**
   - Exactly 1 customer admin exists (`test@orai.hk`, role `user` / `customer_admin` for `test-org`).
   - **Zero `super_admin` accounts exist** in the hosted database. Admin dashboard (`/admin`) login will reject all users until an administrator is provisioned with `system_role = 'super_admin'`.
@@ -106,12 +109,17 @@ All database migrations are located in `supabase/migrations/`:
 
 ## 4. Remaining Blockers Before Real Customer Onboarding
 
-1. **Supabase Cloud Migration `20261123233500` Execution:**
-   - Execute the SQL in Supabase SQL Editor to enable reversible appointment status transitions (`completed` <-> `confirmed`) and grant delete permissions.
+1. **Supabase Cloud Migration Status:**
+   - **Resolved.** All required policies, triggers, and table grants (including `appointments_delete` and version `20261123233500`) are active.
 2. **Vercel Production Environment Variables:**
    - Configure `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in the Vercel dashboard and trigger a redeploy so Supabase Auth can process login requests on production.
 3. **Super Admin Account Provisioning:**
    - Provision an administrative user in Supabase Auth and assign `system_role = 'super_admin'` in `profiles` to enable access to `/admin`.
+4. **Out-of-Scope Production Integrations (Phase 2):**
+   - ElevenLabs live webhook & Agent ID binding.
+   - Live telephony / Twilio Hong Kong phone numbers.
+   - WhatsApp business confirmation notifications.
+   - Google Calendar sync.
 4. **Out-of-Scope Production Integrations (Phase 2):**
    - ElevenLabs live webhook & Agent ID binding.
    - Live telephony / Twilio Hong Kong phone numbers.
