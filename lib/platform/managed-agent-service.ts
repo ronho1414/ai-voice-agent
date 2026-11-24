@@ -48,7 +48,7 @@ export async function command(session: PlatformSession, operation: string, body:
   }
   const { data, error } = await serviceDatabase().rpc("managed_agent_command", { actor_id: session.userId, tenant_id: session.organizationId || null, operation, payload });
   if (error) {
-    if (error.message?.includes("conflict:")) throw new ManagedError("資料已更新或相同要求仍在處理中，請重新載入後檢查。", 409);
+    if (error.message?.includes("conflict:")) throw new ManagedError("資料已更新或相同要求仍在處理中，請覆核最新設定或查看調整記錄。", 409);
     if (error.code === "42501") throw new ManagedError("你沒有權限執行此操作。", 403);
     if (["P0001", "23514", "22P02", "23502"].includes(error.code || "")) throw new ManagedError("操作未完成，請檢查內容、原因及要求狀態。");
     throw new ManagedError("未能儲存，請稍後重試。", 503);

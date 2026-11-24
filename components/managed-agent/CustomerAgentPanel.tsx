@@ -3,14 +3,15 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ChangeRequest, RequestEvent } from "@/lib/platform/agent-preferences";
 import { submissionFeedback } from "@/lib/platform/agent-preferences";
+import { initialPreferenceDraft, preferenceDraftTransition, reviewedPreferences } from "@/lib/platform/agent-preference-draft";
 import { PreferenceFields, PreferenceReadonly } from "./PreferenceFields";
 import {
   MANAGED_REFRESH_EVENT,
   NOTES_MAX,
   apiJson,
+  ApiError,
   changedFields,
   charCount,
-  clonePreferences,
   dispatchManagedRefresh,
   displayAvailability,
   displayText,
@@ -18,7 +19,6 @@ import {
   eventLabel,
   formatDateTime,
   newIdempotencyKey,
-  payloadFingerprint,
   preferencesEqual,
   statusLabel,
   statusTone,
@@ -61,18 +61,21 @@ type CustomerAgentPanelProps = {
 export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }: CustomerAgentPanelProps) {
   const confirmTitleId = useId();
   const submitLock = useRef(false);
-  const dirtyRef = useRef(false);
-  const idempotencyRef = useRef(newIdempotencyKey());
-  const lastPayloadRef = useRef("");
+  const [form, setForm] = useState(initialPreferenceDraft);
+  const formRef = useRef(form);
+  const changeForm = useCallback((event: Parameters<typeof preferenceDraftTransition>[1]) => {
+    const next = preferenceDraftTransition(formRef.current, event);
+    formRef.current = next;
+    setForm(next);
+    return next;
+  }, []);
 
   const [agentLoading, setAgentLoading] = useState(true);
   const [agentError, setAgentError] = useState("");
   const [agent, setAgent] = useState<AgentPayload["agent"] | null>(null);
-  const [activeSettings, setActiveSettings] = useState<Preferences>(emptyPreferences);
-  const [baseVersion, setBaseVersion] = useState(0);
-
-  const [draft, setDraft] = useState<Preferences>(emptyPreferences);
-  const [notes, setNotes] = useState("");
+  const activeSettings = form.latest?.settings ?? emptyPreferences;
+  const draft = form.preferences, notes = form.notes;
+  const [refreshing, setRefreshing] = useState(false);
   const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -93,32 +96,27 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
   const [infoMessage, setInfoMessage] = useState("");
   const [actionBusy, setActionBusy] = useState("");
 
-  const applyAgentPayload = useCallback((body: AgentPayload, forceForm: boolean) => {
+  const applyAgentPayload = useCallback((body: AgentPayload, epoch: number) => {
     setAgent(body.agent);
-    const settings = clonePreferences(body.preferences?.settings ?? emptyPreferences);
-    setActiveSettings(settings);
-    if (forceForm || !dirtyRef.current) {
-      setBaseVersion(body.preferences?.version ?? 0);
-      setDraft(clonePreferences(settings));
-      setNotes("");
-      dirtyRef.current = false;
-      idempotencyRef.current = newIdempotencyKey();
-      lastPayloadRef.current = "";
-    }
-  }, []);
+    const next = changeForm({ type: "receive", snapshot: body.preferences, epoch });
+    if (next.reviewRequired) setConfirmOpen(false);
+  }, [changeForm]);
 
-  const loadAgent = useCallback(async (forceForm: boolean, refreshDraftBase = false) => {
+  const loadAgent = useCallback(async () => {
+    const epoch = formRef.current.refreshEpoch;
     try {
       const body = await apiJson<AgentPayload>("/api/platform/customer/agent");
-      applyAgentPayload(body, forceForm);
-      if (refreshDraftBase) setBaseVersion(body.preferences.version);
+      if (epoch !== formRef.current.refreshEpoch) return;
+      applyAgentPayload(body, epoch);
       setAgentError("");
     } catch (err) {
+      if (epoch !== formRef.current.refreshEpoch) return;
+      changeForm({ type: "refresh_failed" });
       setAgentError(err instanceof Error ? err.message : "無法載入 AI 專員資料");
     } finally {
       setAgentLoading(false);
     }
-  }, [applyAgentPayload]);
+  }, [applyAgentPayload, changeForm]);
 
   const loadHistory = useCallback(async (nextPage: number, opts?: { quiet?: boolean }) => {
     if (!opts?.quiet) setHistoryLoading(true);
@@ -160,18 +158,18 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
   }, []);
 
   useEffect(() => {
-    void loadAgent(true);
+    void loadAgent();
     void loadHistory(1);
   }, [loadAgent, loadHistory]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      void loadAgent(false);
+      void loadAgent();
       void loadHistory(page, { quiet: true });
       if (selectedId) void loadDetail(selectedId, { soft: true });
     }, 15_000);
     const onRefresh = () => {
-      void loadAgent(false);
+      void loadAgent();
       void loadHistory(page, { quiet: true });
       if (selectedId) void loadDetail(selectedId, { soft: true });
     };
@@ -189,22 +187,22 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
   }, [initialRequestId, loadDetail, onRequestHandled]);
 
   function markDirty() {
-    dirtyRef.current = true;
     setFormSuccess("");
     setFormError("");
   }
 
   function updateDraft(next: Preferences) {
     markDirty();
-    setDraft(next);
+    changeForm({ type: "preferences", preferences: next });
   }
 
   function updateNotes(next: string) {
     markDirty();
-    setNotes(next);
+    changeForm({ type: "notes", notes: next });
   }
 
   function validateBeforeConfirm(): string | null {
+    if (formRef.current.reviewRequired || formRef.current.needsRefresh) return "請先覆核最新設定；你的草稿已保留。";
     if (agentError || agentLoading) return "請先成功載入目前生效設定，再提交調整。";
     const changes = changedFields(activeSettings, draft);
     const trimmedNotes = notes.trim();
@@ -222,43 +220,42 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
       setFormError(err);
       return;
     }
-    const fingerprint = payloadFingerprint(draft, notes);
-    if (fingerprint !== lastPayloadRef.current) {
-      idempotencyRef.current = newIdempotencyKey();
-      lastPayloadRef.current = fingerprint;
-    }
+    try { changeForm({ type: "prepare", key: newIdempotencyKey() }); }
+    catch (err) { setFormError(err instanceof Error ? err.message : "請重新覆核設定。"); return; }
     setFormError("");
     setConfirmOpen(true);
   }
 
   async function submitRequest() {
     if (submitLock.current) return;
+    if (formRef.current.reviewRequired || !formRef.current.attempt) {
+      setConfirmOpen(false);
+      setFormError("請先覆核最新設定，再確認提交；你的草稿已保留。");
+      return;
+    }
+    const attempt = formRef.current.attempt;
     submitLock.current = true;
     setSubmitting(true);
     setFormError("");
     try {
       const body = await apiJson<{ request: ChangeRequest; replayed: boolean }>("/api/platform/customer/change-requests", {
         method: "POST",
-        body: JSON.stringify({
-          preferences: draft,
-          additional_notes: notes.trim(),
-          idempotency_key: idempotencyRef.current,
-          base_version: baseVersion,
-        }),
+        body: JSON.stringify(attempt),
       });
       const feedback = submissionFeedback(body.request, body.replayed);
       setConfirmOpen(false);
       setFormSuccess(feedback.message);
-      dirtyRef.current = feedback.terminal;
-      // A known result ends this attempt. Only an explicit new confirmation may
-      // submit again; transport errors below retain the original retry key.
-      idempotencyRef.current = newIdempotencyKey();
-      lastPayloadRef.current = "";
-      await loadAgent(!feedback.terminal, feedback.terminal);
+      changeForm({ type: feedback.terminal ? "terminal" : "accepted" });
+      await loadAgent();
       await loadHistory(1);
       if (feedback.terminal) await loadDetail(body.request.id);
       dispatchManagedRefresh();
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        changeForm({ type: "conflict" });
+        setConfirmOpen(false);
+        await loadAgent();
+      }
       setFormError(err instanceof Error ? err.message : "提交失敗");
       // Keep idempotency key for network/failure retry of the same payload.
     } finally {
@@ -284,7 +281,7 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
       dispatchManagedRefresh();
       await loadDetail(detail.id);
       await loadHistory(page);
-      await loadAgent(false);
+      await loadAgent();
     } catch (err) {
       setDetailError(err instanceof Error ? err.message : "操作失敗");
     } finally {
@@ -365,6 +362,40 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
           </div>
         )}
 
+        {form.reviewRequired && (
+          <section aria-label="覆核設定衝突" className="space-y-4 rounded-2xl border border-[#09090B] bg-[#FAFAFA] p-4">
+            <h3 className="text-sm font-extrabold">請覆核最新設定</h3>
+            <p className="text-xs leading-relaxed text-[#52525B]">
+              生效設定可能已更新，或原要求已結束。你的偏好草稿及備註已保留。
+              覆核後只會保留你改過的欄位，其他欄位採用最新設定；不會自動提交或改動現有服務。
+            </p>
+            {form.latest && (
+              <div className="grid gap-3 lg:grid-cols-2">
+                <PreferenceReadonly title="最新生效設定" preferences={form.latest.settings}
+                  highlightKeys={changedFields(form.baseline?.settings ?? emptyPreferences, form.latest.settings)} />
+                <PreferenceReadonly title="保留修改後的提交預覽" preferences={reviewedPreferences(form)}
+                  highlightKeys={changedFields(form.latest.settings, reviewedPreferences(form))} />
+              </div>
+            )}
+            {form.needsRefresh && <p role="status" className="text-xs font-semibold">尚未成功取得最新設定，請重試；草稿不會被清除。</p>}
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled={refreshing || submitting} onClick={async () => {
+                setRefreshing(true); await loadAgent(); setRefreshing(false);
+              }} className="rounded-xl border border-[#E4E4E7] bg-white px-4 py-2 text-xs font-bold disabled:opacity-50">
+                {refreshing ? "取得中…" : "重新取得最新設定"}
+              </button>
+              <button type="button" disabled={!form.latest || form.needsRefresh || Boolean(agentError) || refreshing || submitting} onClick={() => {
+                try {
+                  changeForm({ type: "review", version: form.latest!.version }); setFormError(""); setFormSuccess("");
+                } catch (err) { setFormError(err instanceof Error ? err.message : "請重新覆核設定。"); }
+              }} className="rounded-xl bg-[#09090B] px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
+                已覆核，保留我的修改
+              </button>
+            </div>
+            <p className="text-xs text-[#71717A]">覆核後，請再按「提交調整要求」及「確認提交」。</p>
+          </section>
+        )}
+
         <PreferenceFields
           idPrefix="customer-agent"
           value={draft}
@@ -388,7 +419,7 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
           <button
             type="button"
             onClick={openConfirm}
-            disabled={agentLoading || Boolean(agentError) || submitting || (preferencesEqual(activeSettings, draft) && !notes.trim())}
+            disabled={agentLoading || Boolean(agentError) || submitting || form.reviewRequired || form.needsRefresh || (preferencesEqual(activeSettings, draft) && !notes.trim())}
             className="rounded-xl bg-[#09090B] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#27272A] disabled:opacity-50"
           >
             提交調整要求

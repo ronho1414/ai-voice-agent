@@ -25,6 +25,10 @@ export function dispatchManagedRefresh() {
   window.dispatchEvent(new CustomEvent(MANAGED_REFRESH_EVENT));
 }
 
+export class ApiError extends Error {
+  constructor(message: string, public status: number) { super(message); }
+}
+
 export async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     cache: "no-store",
@@ -47,7 +51,7 @@ export async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
         : res.status === 409
           ? "資料已更新或要求重複，請重新整理後再試。"
           : "操作失敗，請稍後重試。";
-    throw new Error(err);
+    throw new ApiError(err, res.status);
   }
   return body as T;
 }
