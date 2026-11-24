@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment } from "react";
+import { visiblePreferenceKeys } from "@/lib/platform/agent-preferences";
 import {
   GREETING_MAX,
   NOTES_MAX,
@@ -45,7 +46,7 @@ export function PreferenceFields({
 
   return (
     <div className="space-y-5">
-      {(Object.keys(preferenceOptions) as (keyof typeof preferenceOptions)[]).map((key) => {
+      {visiblePreferenceKeys.filter(key => key !== "greeting").map((key) => {
         const options = preferenceOptions[key];
         const selected = value[key];
         const isChanged = highlighted.has(key);
@@ -55,7 +56,7 @@ export function PreferenceFields({
           {key === "response_style" && <h3 className="text-sm font-extrabold">服務偏好</h3>}
           <fieldset
             disabled={disabled}
-            className={`rounded-2xl border p-4 ${isChanged ? "border-[#09090B] bg-[#FAFAFA]" : "border-[#E4E4E7] bg-white"}`}
+            className={`rounded-2xl border p-4 ${isChanged ? "border-emerald-300 bg-emerald-50" : "border-[#E4E4E7] bg-white"}`}
           >
             <legend className="px-1 text-xs font-extrabold text-[#09090B]">{preferenceLabels[key]}</legend>
             {current && (
@@ -72,7 +73,7 @@ export function PreferenceFields({
                     htmlFor={inputId}
                     className={`flex cursor-pointer items-start gap-2 rounded-xl border px-3 py-2.5 text-xs transition-colors ${
                       selected === optionKey
-                        ? "border-[#09090B] bg-[#09090B] text-white"
+                        ? isChanged ? "border-emerald-500 bg-emerald-100 text-emerald-900" : "border-[#09090B] bg-[#09090B] text-white"
                         : "border-[#E4E4E7] bg-white text-[#3F3F46] hover:border-[#A1A1AA]"
                     }`}
                   >
@@ -102,7 +103,7 @@ export function PreferenceFields({
         );
       })}
 
-      <div className={`rounded-2xl border p-4 ${highlighted.has("greeting") ? "border-[#09090B] bg-[#FAFAFA]" : "border-[#E4E4E7] bg-white"}`}>
+      <div className={`rounded-2xl border p-4 ${highlighted.has("greeting") ? "border-emerald-300 bg-emerald-50" : "border-[#E4E4E7] bg-white"}`}>
         <label htmlFor={`${idPrefix}-greeting`} className="block text-xs font-extrabold text-[#09090B]">
           {preferenceLabels.greeting}
         </label>
@@ -119,7 +120,7 @@ export function PreferenceFields({
             if (charCount(next) <= GREETING_MAX) setField("greeting", next);
           }}
           placeholder="例如：你好，歡迎查詢，我可以幫你介紹療程同預約時間。"
-          className="mt-3 w-full resize-y rounded-xl border border-[#E4E4E7] bg-white px-3 py-2.5 text-sm leading-relaxed text-[#09090B] focus:border-[#09090B] focus:outline-none disabled:opacity-60"
+          className={`mt-3 w-full resize-y rounded-xl border border-[#E4E4E7] bg-white px-3 py-2.5 text-sm leading-relaxed ${highlighted.has("greeting") ? "text-emerald-800" : "text-[#09090B]"} focus:border-[#09090B] focus:outline-none disabled:opacity-60`}
         />
         <div className="mt-2 text-right text-[11px] text-[#71717A]">
           {charCount(value.greeting)} / {GREETING_MAX}
@@ -167,15 +168,15 @@ export function PreferenceReadonly({
     <section className="rounded-2xl border border-[#E4E4E7] bg-white p-4">
       <h3 className="text-sm font-extrabold text-[#09090B]">{title}</h3>
       <dl className="mt-3 space-y-2">
-        {(Object.keys(preferenceLabels) as (keyof Preferences)[]).map((key) => (
+        {visiblePreferenceKeys.map((key) => (
           <div
             key={key}
             className={`flex flex-col gap-0.5 rounded-xl px-3 py-2 text-xs sm:flex-row sm:justify-between ${
-              highlighted.has(key) ? "bg-[#F4F4F5] ring-1 ring-[#09090B]" : "bg-[#FAFAFA]"
+              highlighted.has(key) ? "bg-emerald-50 ring-1 ring-emerald-200" : "bg-[#FAFAFA]"
             }`}
           >
             <dt className="font-semibold text-[#52525B]">{preferenceLabels[key]}</dt>
-            <dd className="font-bold text-[#09090B] sm:text-right">{preferenceValueLabel(key, preferences[key])}</dd>
+            <dd className={`font-bold sm:text-right ${highlighted.has(key) ? "text-emerald-700" : "text-[#09090B]"}`}>{preferenceValueLabel(key, preferences[key])}</dd>
           </div>
         ))}
       </dl>

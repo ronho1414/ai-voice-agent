@@ -7,6 +7,11 @@ export const preferenceOptions = {
   preferred_language: { auto: "自動識別客戶語言", cantonese: "廣東話優先", english: "英語優先", mandarin: "普通話優先" },
 } as const;
 export type Preferences = { [K in keyof typeof preferenceOptions]: keyof (typeof preferenceOptions)[K] | null } & { greeting: string };
+// Retired fields remain in stored snapshots for compatibility, never in dashboard controls.
+export const visiblePreferenceKeys = ["voice_gender", "response_style", "greeting"] as const;
+export function visiblePreferenceValues(active: Preferences, requested: Preferences): Preferences {
+  return { ...active, voice_gender: requested.voice_gender, response_style: requested.response_style, greeting: requested.greeting };
+}
 export const emptyPreferences: Preferences = { voice_gender: null, voice_character: null, speaking_speed: null, response_style: null, response_detail: null, preferred_language: null, greeting: "" };
 export const preferenceLabels: Record<keyof Preferences, string> = { voice_gender: "聲線性別", voice_character: "聲線特色", speaking_speed: "說話速度", response_style: "回應風格", response_detail: "回應詳細程度", preferred_language: "優先回應語言", greeting: "專屬歡迎語" };
 export const styleExamples = { friendly: "你好呀！想了解邊款護理？我幫你睇吓。", professional: "你好，歡迎查詢。我可以為你介紹療程及預約安排。", proactive: "你好！想改善邊方面嘅膚質？我可以先介紹合適嘅護理。", caring: "你好呀，慢慢講，唔使急。我會細心了解你嘅需要。" };

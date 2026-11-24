@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ChangeRequest, RequestEvent } from "@/lib/platform/agent-preferences";
-import { submissionFeedback } from "@/lib/platform/agent-preferences";
+import { submissionFeedback, visiblePreferenceKeys } from "@/lib/platform/agent-preferences";
 import { initialPreferenceDraft, preferenceDraftTransition, reviewedPreferences } from "@/lib/platform/agent-preference-draft";
 import { PreferenceFields, PreferenceReadonly } from "./PreferenceFields";
 import {
@@ -290,7 +290,7 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
   }
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const draftChanges = changedFields(activeSettings, draft);
+  const draftChanges = changedFields(activeSettings, draft).filter(key => visiblePreferenceKeys.some(visible => visible === key));
 
   return (
     <div className="space-y-6">
@@ -468,7 +468,7 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
                       <div className="text-xs font-extrabold text-[#09090B]">{item.reference}</div>
                       <div className="mt-1 text-[11px] text-[#71717A]">
                         {formatDateTime(item.created_at)}
-                        {item.changed_fields?.length ? ` · 變更 ${item.changed_fields.length} 項` : ""}
+                        {item.changed_fields?.some(key => visiblePreferenceKeys.some(visible => visible === key)) ? ` · 變更 ${item.changed_fields.filter(key => visiblePreferenceKeys.some(visible => visible === key)).length} 項` : ""}
                       </div>
                     </div>
                     <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-[11px] font-bold ${statusTone(item.status)}`}>

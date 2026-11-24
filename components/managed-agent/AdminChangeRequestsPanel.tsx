@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ChangeRequest, RequestEvent, RequestStatus } from "@/lib/platform/agent-preferences";
+import { visiblePreferenceKeys, visiblePreferenceValues } from "@/lib/platform/agent-preferences";
 import { PreferenceFields, PreferenceReadonly } from "./PreferenceFields";
 import {
   MANAGED_REFRESH_EVENT,
@@ -9,7 +10,6 @@ import {
   apiJson,
   changedFields,
   charCount,
-  clonePreferences,
   dispatchManagedRefresh,
   emptyPreferences,
   eventLabel,
@@ -154,7 +154,7 @@ export function AdminChangeRequestsPanel({
       const body = await apiJson<DetailResponse>(`/api/platform/admin/change-requests?id=${encodeURIComponent(id)}`);
       setDetail(body);
       if (!soft) {
-        setFinalPrefs(clonePreferences(body.request.requested_settings || body.active_preferences.settings || emptyPreferences));
+        setFinalPrefs(visiblePreferenceValues(body.active_preferences.settings, body.request.requested_settings));
         setReviewStale(false);
       }
       setDetailError("");
@@ -349,7 +349,7 @@ export function AdminChangeRequestsPanel({
                       {item.organizations?.slug ? `${item.organizations.slug} · ` : ""}
                       {formatDateTime(item.created_at)} · 更新：{formatDateTime(item.updated_at)}
                       {item.overdue ? " · 逾時超過 24 小時" : ""}
-                      <div className="mt-1">{item.changed_fields.map(key => preferenceLabels[key]).join("、") || "其他調整要求"} · 負責管理員：{item.assigned_admin_id || "未指派"}</div>
+                      <div className="mt-1">{item.changed_fields.filter(key => visiblePreferenceKeys.some(visible => visible === key)).map(key => preferenceLabels[key]).join("、") || "其他調整要求"} · 負責管理員：{item.assigned_admin_id || "未指派"}</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -697,7 +697,7 @@ export function AdminChangeRequestsPanel({
                 disabled={!!actionBusy || !manualConfirmed || (isStale && !reviewStale)}
                 onClick={() =>
                   void runAction("complete", {
-                    final_preferences: finalPrefs,
+                    final_preferences: visiblePreferenceValues(detail.active_preferences.settings, finalPrefs),
                     expected_active_version: reviewedActiveVersion,
                     manual_update_confirmed: true,
                     review_stale: isStale ? true : undefined,
