@@ -101,7 +101,7 @@ begin
   select * into existing from public.agent_change_requests where organization_id=tenant_id and idempotency_key=(payload->>'idempotency_key')::uuid;
   if found then
    if existing.requested_settings<>requested or existing.additional_notes<>msg or existing.base_version<>(payload->>'base_version')::integer then raise exception using errcode='P0001',message='conflict: idempotency key reused'; end if;
-   return to_jsonb(existing);
+   return to_jsonb(existing)||jsonb_build_object('submission_replayed',true);
   end if;
   select id into agent from public.agents where organization_id=tenant_id order by created_at,id limit 1;
   if agent is null then raise exception 'Agent not provisioned'; end if;
@@ -111,7 +111,7 @@ begin
   select * into existing from public.agent_change_requests where organization_id=tenant_id and idempotency_key=(payload->>'idempotency_key')::uuid;
   if found then
    if existing.requested_settings<>requested or existing.additional_notes<>msg or existing.base_version<>(payload->>'base_version')::integer then raise exception 'conflict: idempotency key reused'; end if;
-   return to_jsonb(existing);
+   return to_jsonb(existing)||jsonb_build_object('submission_replayed',true);
   end if;
   if (payload->>'base_version')::integer is distinct from pref.version then raise exception 'conflict: active preferences changed; refresh first'; end if;
   select coalesce(jsonb_agg(k order by k),'[]'::jsonb) into delta from jsonb_object_keys(requested) k where requested->k is distinct from pref.settings->k;
@@ -156,7 +156,7 @@ begin
   end if;
   update public.agent_change_requests set status=next_status,version=version+1,updated_at=now(),
    assigned_admin_id=case when admin then actor_id else assigned_admin_id end,
-   customer_visible_response=case when admin then msg else customer_visible_response end,
+   customer_visible_response=case when admin and msg<>'' then msg else customer_visible_response end,
    final_applied_settings=case when next_status='completed' then payload->'final_preferences' else final_applied_settings end,
    completed_at=case when next_status='completed' then now() else completed_at end
    where id=req.id returning * into req;
@@ -172,7 +172,7 @@ begin
   select m.profile_id,req.id,req.organization_id,title,event_id::text from public.organization_members m
    where m.organization_id=req.organization_id and m.is_active on conflict do nothing;
  end if;
- return to_jsonb(req);
+ return to_jsonb(req)||case when operation='submitted' then jsonb_build_object('submission_replayed',false) else '{}'::jsonb end;
 end $$;
 revoke all on function public.managed_agent_command(uuid,uuid,text,jsonb) from public,anon,authenticated;
 grant execute on function public.managed_agent_command(uuid,uuid,text,jsonb) to service_role;

@@ -71,7 +71,7 @@ async function asUser(user: string, sql: string, role = "authenticated") {
 
 
 import { emptyPreferences, parsePreferences } from '../lib/platform/agent-preferences';
-type Req={id:string;status:string;version:number;base_version:number;reference:string;requested_settings:Record<string,unknown>;changed_fields:string[]};
+type Req={id:string;status:string;version:number;base_version:number;reference:string;requested_settings:Record<string,unknown>;changed_fields:string[];submission_replayed?:boolean;customer_visible_response:string};
 async function cmd(actor:string,operation:string,payload:Record<string,unknown>,tenant=orgA){
  await db.exec('set role service_role');
  try{return (await db.query<{result:Req}>(`select public.managed_agent_command($1,$2,$3,$4::jsonb) as result`,[actor,tenant,operation,JSON.stringify(payload)])).rows[0].result;}
@@ -178,4 +178,43 @@ test('notification failure rolls back completion and active preference changes t
  assert.deepEqual(await current(),before);
  const stored=(await db.query<{status:string;version:number}>('select status,version from public.agent_change_requests where id=$1',[r.id])).rows[0];
  assert.equal(stored.status,'in_progress');assert.equal(stored.version,r.version);
+});
+
+test('terminal submission retries return the original current state without side effects; new intentions need new keys',async()=>{
+ for(const status of ['cancelled','rejected','completed']){
+  const active=await current();
+  const payload={preferences:{...active.settings,greeting:`FICTIONAL ${status}`},additional_notes:`FICTIONAL retry ${status}`,base_version:active.version,idempotency_key:crypto.randomUUID()};
+  let r=await cmd(userA,'submit',payload);assert.equal(r.submission_replayed,false);
+  if(status==='cancelled')r=await cmd(userA,'cancel',{id:r.id,expected_version:r.version});
+  else if(status==='rejected')r=await act(r,'reject',{message:'FICTIONAL not adopted'});
+  else{r=await act(r,'start');r=await act(r,'complete',{final_preferences:r.requested_settings,manual_update_confirmed:true});}
+  const snapshot=async()=>({active:await current(),counts:(await db.query('select (select count(*) from public.agent_change_requests) requests,(select count(*) from public.agent_change_request_events) events,(select count(*) from public.notifications) notifications')).rows});
+  const before=await snapshot();
+  const retry=await cmd(userA,'submit',payload);
+  assert.equal(retry.id,r.id);assert.equal(retry.status,status);assert.equal(retry.submission_replayed,true);
+  assert.deepEqual(await snapshot(),before);
+  await assert.rejects(cmd(userA,'submit',{...payload,additional_notes:'DIFFERENT'}),/idempotency key reused/);
+  const fresh=await cmd(userA,'submit',{...payload,base_version:(await current()).version,idempotency_key:crypto.randomUUID()});
+  assert.notEqual(fresh.id,r.id);assert.equal(fresh.status,'pending');assert.equal(fresh.submission_replayed,false);
+ }
+});
+
+test('blank admin transitions preserve the last non-empty reply and every response remains in the audit history',async()=>{
+ let r=await submit({},'FICTIONAL response history');r=await act(r,'start');
+ r=await act(r,'needs_information',{message:'FICTIONAL first admin response'});
+ r=await cmd(userA,'provide_information',{id:r.id,expected_version:r.version,message:'FICTIONAL customer answer one'});
+ assert.equal(r.customer_visible_response,'FICTIONAL first admin response');
+ r=await act(r,'start');assert.equal(r.customer_visible_response,'FICTIONAL first admin response');
+ r=await act(r,'needs_information',{message:'FICTIONAL second admin response'});
+ r=await cmd(userA,'provide_information',{id:r.id,expected_version:r.version,message:'FICTIONAL customer answer two'});
+ r=await act(r,'start',{message:'   '});assert.equal(r.customer_visible_response,'FICTIONAL second admin response');
+ r=await act(r,'complete',{final_preferences:r.requested_settings,manual_update_confirmed:true});
+ assert.equal(r.customer_visible_response,'FICTIONAL second admin response');
+ const stored=((await asUser(userA,`select customer_visible_response from public.agent_change_requests where id='${r.id}'`)).rows as {customer_visible_response:string}[])[0];
+ assert.equal(stored.customer_visible_response,'FICTIONAL second admin response');
+ const events=(await asUser(userA,`select kind,message from public.agent_change_request_events where request_id='${r.id}'`)).rows as {kind:string;message:string}[];
+ assert.equal(events.length,9);
+ for(const message of ['FICTIONAL first admin response','FICTIONAL second admin response','FICTIONAL customer answer one','FICTIONAL customer answer two'])assert.ok(events.some(e=>e.message===message));
+ assert.equal(events.filter(e=>e.kind==='start'&&e.message==='').length,3);
+ assert.ok(events.some(e=>e.kind==='complete'&&e.message===''));
 });

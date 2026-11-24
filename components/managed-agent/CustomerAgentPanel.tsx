@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ChangeRequest, RequestEvent } from "@/lib/platform/agent-preferences";
+import { submissionFeedback } from "@/lib/platform/agent-preferences";
 import { PreferenceFields, PreferenceReadonly } from "./PreferenceFields";
 import {
   MANAGED_REFRESH_EVENT,
@@ -106,10 +107,11 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
     }
   }, []);
 
-  const loadAgent = useCallback(async (forceForm: boolean) => {
+  const loadAgent = useCallback(async (forceForm: boolean, refreshDraftBase = false) => {
     try {
       const body = await apiJson<AgentPayload>("/api/platform/customer/agent");
       applyAgentPayload(body, forceForm);
+      if (refreshDraftBase) setBaseVersion(body.preferences.version);
       setAgentError("");
     } catch (err) {
       setAgentError(err instanceof Error ? err.message : "無法載入 AI 專員資料");
@@ -235,7 +237,7 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
     setSubmitting(true);
     setFormError("");
     try {
-      await apiJson("/api/platform/customer/change-requests", {
+      const body = await apiJson<{ request: ChangeRequest; replayed: boolean }>("/api/platform/customer/change-requests", {
         method: "POST",
         body: JSON.stringify({
           preferences: draft,
@@ -244,14 +246,18 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
           base_version: baseVersion,
         }),
       });
+      const feedback = submissionFeedback(body.request, body.replayed);
       setConfirmOpen(false);
-      setFormSuccess("調整要求已提交，Orai 專人將會審核。");
-      dirtyRef.current = false;
+      setFormSuccess(feedback.message);
+      dirtyRef.current = feedback.terminal;
+      // A known result ends this attempt. Only an explicit new confirmation may
+      // submit again; transport errors below retain the original retry key.
       idempotencyRef.current = newIdempotencyKey();
       lastPayloadRef.current = "";
-      dispatchManagedRefresh();
-      await loadAgent(true);
+      await loadAgent(!feedback.terminal, feedback.terminal);
       await loadHistory(1);
+      if (feedback.terminal) await loadDetail(body.request.id);
+      dispatchManagedRefresh();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "提交失敗");
       // Keep idempotency key for network/failure retry of the same payload.

@@ -823,3 +823,44 @@ Independent orai-test-runner completed against this feature working tree:
 
 No secrets or local data/config were staged. Unrelated .codex files preserved.
 No merge, hosted migration, production data change, deployment or added cost.
+
+## PR #5 Bugbot follow-up — 2026-11-25
+
+Scope limited to the two unresolved findings on d4b678e. The branch remains
+`codex/managed-agent-requests`, stacked on PR #4 (`codex/elevenlabs-post-call`).
+
+- Submit RPC now marks replayed results explicitly on both idempotency lookup
+  paths. Replays retain the original row/current status and perform no request,
+  preference, event or notification writes. API returns200 for replay,201 only
+  for a new pending request; private RPC metadata is mapped to a public replay flag.
+- Customer feedback uses the persisted status rather than always claiming a new
+  pending request. Terminal replay keeps the draft, refreshes the active baseline,
+  displays the original request, and rotates the idempotency key. An intentional
+  new request requires another explicit confirmation. Unknown/network failures
+  preserve the original key for safe retry.
+- Empty/whitespace-only admin messages no longer clear the last non-empty
+  customer-visible response. New non-empty responses replace the summary field;
+  every transition and each prior response remain in customer-readable audit events.
+- Regression tests cover all three terminal statuses, side-effect-free retries,
+  fresh-key intentional resubmission, replay HTTP/feedback for all six statuses,
+  and repeated information/start/complete transitions with full response history.
+
+The existing UNAPPLIED managed-agent migration is amended; it has not been applied
+to hosted staging or production. No changes to ElevenLabs ingestion or existing
+hosted staging, RLS grants, automatic deployment settings or PR dependency.
+
+Independent verification PASSED: security31/31, webhook5/5, booking8/8,
+managed-agent17/17 (61 total). Typecheck, lint (0 errors,9 existing unrelated
+warnings), production build and diff check passed. Initial missing PGlite test
+result types were fixed without weakening assertions; final rerun passed. Build
+initially hit Windows EPERM; approved elevated retry passed exit0.
+
+Independent production-server smoke passed on both localhost and127.0.0.1:
+/, /beauty, /dashboard and /admin200; protected GET APIs401; same-origin POST401,
+foreign/missing-origin POST403; retired agent PATCH405. Owned server stopped.
+
+FAILED: no remaining verification failures. NOT VERIFIED: authenticated browser
+interaction and hosted persistence for this unapproved migration. SQL tests use
+local PGlite and API transport is mocked, not proof of real Supabase sessions.
+No hosted migration, deployment, merge or production data change was performed.
+Existing real ElevenLabs staging integration was preserved and not reconfigured.

@@ -1,13 +1,19 @@
 import { withPlatformRequest } from "@/lib/platform/supabase-auth";
 import { requireCustomerAuth } from "@/lib/platform/auth";
 import { command, listOrDetail, managedFailure, ManagedError, readBody } from "@/lib/platform/managed-agent-service";
+import type { ChangeRequest } from "@/lib/platform/agent-preferences";
 export const GET = withPlatformRequest(async request => {
   const session = await requireCustomerAuth(request); if (session instanceof Response) return session;
   try { return Response.json(await listOrDetail(request, session, false)); } catch (e) { return managedFailure(e); }
 });
 export const POST = withPlatformRequest(async request => {
   const session = await requireCustomerAuth(request); if (session instanceof Response) return session;
-  try { return Response.json({ request: await command(session, "submit", await readBody(request)) }, { status: 201 }); } catch (e) { return managedFailure(e); }
+  try {
+    const { submission_replayed, ...saved } = await command(session, "submit", await readBody(request)) as ChangeRequest & { submission_replayed?: boolean };
+    // A retry returns the persisted request's current state, never a new pending claim.
+    const replayed = submission_replayed === true || saved.status !== "pending";
+    return Response.json({ request: saved, replayed }, { status: replayed ? 200 : 201 });
+  } catch (e) { return managedFailure(e); }
 });
 export const PATCH = withPlatformRequest(async request => {
   const session = await requireCustomerAuth(request); if (session instanceof Response) return session;

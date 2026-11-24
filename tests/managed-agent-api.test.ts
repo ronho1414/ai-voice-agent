@@ -15,6 +15,7 @@ const revoked = new Set<string>();
 const disabled = new Set<string>();
 let rpcPayload: Record<string,unknown> | null = null;
 let rpcError: Record<string,string> | null = null;
+let rpcResult = {id:"persisted-request",reference:"REQ-000001",status:"pending",submission_replayed:false};
 let roleOverride: string | undefined;
 const authRateLimited = false;
 const authUnavailable = false;
@@ -99,7 +100,7 @@ before(() => {
     }
     if(url.pathname.endsWith('/rpc/managed_agent_command')) {
       assert.equal(token,'service-test-key'); rpcPayload=JSON.parse(String(options?.body));
-      return rpcError ? Response.json(rpcError,{status:400}) : Response.json({id:'persisted-request',status:'pending'});
+      return rpcError ? Response.json(rpcError,{status:400}) : Response.json(rpcResult);
     }
     if(url.pathname.endsWith('/agents')) return Response.json([{name:'Fictional Agent',status:'draft',language_mode:'trilingual',config:{customer_instructions:'PRIVATE PROMPT',secret:'PRIVATE CREDENTIAL'}}]);
     if(url.pathname.endsWith('/agent_preferences')) return Response.json(null);
@@ -118,6 +119,7 @@ import { GET as agentInfo } from '../app/api/platform/customer/agent/route';
 import { POST as submitRequest, PATCH as changeRequest, GET as getRequests } from '../app/api/platform/customer/change-requests/route';
 import { PATCH as adminRequest } from '../app/api/platform/admin/change-requests/route';
 import { emptyPreferences } from '../lib/platform/agent-preferences';
+import { submissionFeedback, type RequestStatus } from '../lib/platform/agent-preferences';
 const reqId='40000000-0000-4000-8000-000000000001';
 const payload=()=>({preferences:{...emptyPreferences,voice_gender:'male'},base_version:0,idempotency_key:crypto.randomUUID()});
 const customerPath='/api/platform/customer/change-requests';
@@ -160,4 +162,22 @@ test('admin completion requires explicit manual test confirmation and reviewed a
  assert.equal((await adminRequest(request(path,'PATCH',{...body,manual_update_confirmed:true},cookie))).status,400);
  assert.equal((await adminRequest(request(path,'PATCH',{...body,manual_update_confirmed:true,expected_active_version:0},cookie))).status,200);
  assert.equal(rpcPayload?.actor_id,'user-admin');assert.equal(rpcPayload?.tenant_id,null);
+});
+
+test('replayed submissions use HTTP200 and actual persisted status; terminal feedback never claims a new pending request',async()=>{
+ const cookie=cookieJar(await login('a@example.test'));
+ try{
+  for(const status of ['pending','in_progress','needs_information','cancelled','rejected','completed'] as RequestStatus[]){
+   rpcResult={...rpcResult,status,submission_replayed:true};
+   const response=await submitRequest(request(customerPath,'POST',payload(),cookie));assert.equal(response.status,200);
+   const body=await response.json();assert.equal(body.replayed,true);assert.equal(body.request.status,status);assert.equal(body.request.submission_replayed,undefined);
+   const feedback=submissionFeedback(body.request,body.replayed);
+   const terminal=['cancelled','rejected','completed'].includes(status);
+   assert.equal(feedback.terminal,terminal);assert.ok(!feedback.message.includes('已提交，Orai 專人將會審核'));
+   if(terminal)assert.match(feedback.message,/沒有建立新要求/);
+  }
+ }finally{rpcResult={...rpcResult,status:'pending',submission_replayed:false};}
+ const response=await submitRequest(request(customerPath,'POST',payload(),cookie));assert.equal(response.status,201);
+ const body=await response.json();assert.equal(body.replayed,false);assert.equal(submissionFeedback(body.request,false).terminal,false);
+ assert.throws(()=>submissionFeedback({status:'invalid' as RequestStatus,reference:'REQ-1'},true));
 });
