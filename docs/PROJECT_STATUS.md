@@ -445,3 +445,143 @@ booking8/8, typecheck/lint/build/diff check pass (9 existing lint warnings).
 Local built HTTP smoke passes; staged probe syntax passes but no hosted probe
 executed. Extra local SQL probe rejects conflicting current/historical owners.
 New ownership protection is local code only until separately approved migration.
+
+## Approved staging execution — actual progress 2026-11-24
+
+User approved isolated staging setup, migrations, fictional accounts, deployment
+and E2E tests, conditional on confirming any additional costs. Production remains
+untouched; PR #4 remains unmerged.
+
+- Organization confirmed by user: ronho1414's Org / jbzapppkcyvhaadwltec.
+- Supabase quoted separate project additional monthly amount0; branch0.01344/hour.
+  Chose separate project; no paid branch. No paid upgrade/add-on authorized.
+- CREATED orai-pr4-staging, ref wnajobvcldveajtdvbwg, region ap-northeast-1,
+  ACTIVE_HEALTHY. Before schema setup public application table count was0.
+- APPLIED all five prerequisites to this empty staging project, then both new
+  migrations: elevenlabs_post_call and immutable_agent_ownership. All7 succeeded.
+  No existing/production database was targeted or copied.
+- Verified both RPCs service-role-only (anon/authenticated execute=false), registry
+  RLS=true, initial organizations/profiles/conversations counts all0.
+- CREATED two fictional merchant records staging-salon-a and staging-salon-b,
+  each with a draft agent and empty provider agent ID. No real agent IDs assigned.
+- Vercel connection newly added by user, but both get_git_deployment_context and
+  list_teams returned teams=[]. No deployment/team/plan/cost can be confirmed yet.
+  Need the intended Vercel team/account slug or expanded team authorization.
+- Created ignored .env.staging.local template pointed ONLY to staging. Missing
+  SUPABASE_SERVICE_ROLE_KEY blocks use of supported Auth Admin API. Operator must
+  paste the staging project's server key into the LOCAL file, not chat or docs.
+  Public key/URL present. Do not copy any production service key.
+- Prepared ignored local account provisioning helper data/staging-provision.mjs
+  (syntax checked), to run via node --env-file=.env.staging.local after key setup.
+  It creates test-admin plus two fictional merchant Auth users, confirms email via
+  Admin API without sending email, persists random passwords only in ignored
+  data/staging-test-accounts.json, links roles/memberships and checks password
+  login and tenant isolation. NOT executed yet: no Auth users/admin claimed ready.
+- No Vercel project/deployment, hosted webhook probe or actual ElevenLabs call
+  performed yet. Existing31/5/8 local suites stand; no unrelated repeated audit.
+
+Immediate operator actions: authorize the intended Vercel team or provide its
+slug; insert staging server key from Supabase staging Settings > API Keys into
+.env.staging.local. Never paste secrets into chat. After these prerequisites,
+continue account setup, dedicated Vercel staging project/cost check, deployment,
+then configure TWO new ElevenLabs staging agents. Copy their IDs (not API keys)
+for tenant A/B mapping; webhook secret must go only into staging Vercel env and
+local ignored staging env. Keep webhook disabled until endpoint is ready.
+
+Vercel post-install recheck: connection exists, but get_git_deployment_context
+and list_teams still return teams=[]. Need target team/account slug to request
+team-specific authorization; installing alone did not expose a deployment scope.
+Local staging config presence check (no values output): staging URL correct,
+server key absent, signing secret absent. Auth Admin provisioning/deployment
+remain pending these inputs; no extra cloud resources or deployments created.
+
+## Vercel staging deployment — actual READY and protection checks (2026-11-24)
+
+- Vercel team ronho1414 authorization now works; confirmed existing Hobby plan.
+  Created only dedicated project orai-pr4-staging / prj_jFozNUtpm9Ak2b4aDXOoXV3lS2Y0.
+  A request explicitly selecting Build Machines was rejected by the plan; retried
+  WITHOUT paid build-machine settings. No plan upgrade or paid add-on purchased.
+- Deployment dpl_BhCM2E7Y5uyayY93KfW121Zwborf is READY. Git source is exact PR4
+  commit cf09b4c8efc255c550a4938ea6757c0d0773247d. No main merge or production
+  project mutation. Vercel labels target=production inside this NEW dedicated
+  staging project; this is not the existing ai-voice-agent production project.
+- Canonical staging URL: https://orai-pr4-staging.vercel.app
+- Commit alias: https://orai-pr4-staging-git-cf09b4c-ronho1414.vercel.app
+- Immutable URL: https://orai-pr4-staging-fk0hbbbmw-ronho1414.vercel.app
+- Complete webhook: https://orai-pr4-staging.vercel.app/api/webhooks/elevenlabs
+- Deployment Protection remains enabled for ALL deployments of staging project.
+  Generated a staging-project-only automation bypass; kept value solely in the
+  git-ignored .env.staging.local as VERCEL_AUTOMATION_BYPASS_SECRET. No bypass
+  value is printed here. Revoke after tests; it grants staging-project access,
+  not a path-specific exception. App Auth and webhook HMAC remain required.
+- Real external HTTP checks against canonical URL: no bypass -> protected401;
+  x-vercel-protection-bypass but no signature -> app401 Invalid signature;
+  bypass + valid HMAC on ignored fictional staging_probe -> app200 ignored.
+  This proves the bypass/HMAC access path works, NOT real post-call persistence.
+- Supabase URL was read back from Vercel env and equals ONLY
+  https://wnajobvcldveajtdvbwg.supabase.co. Staging public key configured.
+  SUPABASE_SERVICE_ROLE_KEY is still ABSENT (local and Vercel); no claim of
+  working privileged database connectivity, test Auth accounts or sync success.
+- A temporary local random ELEVENLABS_WEBHOOK_SECRET was generated for HMAC
+  transport testing and set only on this staging project. It does NOT yet match
+  a provider-created ElevenLabs webhook secret. Replace it with that webhook's
+  actual signing secret before real provider testing and redeploy staging.
+- Configure ElevenLabs request_headers with x-vercel-protection-bypass using
+  the saved local bypass value. Header configuration may require ElevenLabs API;
+  do not assume the Dashboard exposes custom headers. A Vercel browser login
+  or this endpoint URL alone cannot authenticate ElevenLabs deliveries.
+
+Immediate blockers remaining: staging server key via local ignored file,
+provision the test admin/merchant Auth users, dedicated ElevenLabs agent IDs,
+provider signing secret and automation-bypass header configuration, then approved
+staging env update/redeployment and first actual fictional post-call test.
+No product-code changes or repeated full audits were introduced for deployment.
+
+## Staging integration execution — credentials supplied, hosted synthetic E2E passes
+
+User supplied the provider signing secret and staging server key in local ignored
+.env.staging.local. Values were transferred only into dedicated Vercel staging
+project encrypted env; no secret values were printed or committed.
+
+- Provisioned 1 test Super Admin and 2 fictional merchant Auth accounts using
+  supported Supabase Auth Admin API. Passwords stay only in ignored
+  data/staging-test-accounts.json. Supabase password login and A/B row isolation
+  passed. No emails sent (test accounts created confirmed).
+- Redeployed same cf09b4c to dpl_nEHcenaPvtQfgtoc7tnA1S53s1yX, READY.
+  New immutable URL: https://orai-pr4-staging-bz4cxvaxd-ronho1414.vercel.app
+  Canonical https://orai-pr4-staging.vercel.app now explicitly aliases this new
+  deployment, not the previous missing-server-key build. Commit alias remains
+  https://orai-pr4-staging-git-cf09b4c-ronho1414.vercel.app .
+- Both staging Supabase public URL/key and server key configured in dedicated
+  staging project's environments; data writes confirmed in wnajobvcldveajtdvbwg.
+- Fixed LOCAL-only missing bypass entry after local env editing (restored the
+  already-configured bypass, did not disable protection or create broad rules).
+- Hosted synthetic post_call_transcription: invalid HMAC401, valid200 synced,
+  duplicate200 synced, exactly1 Supabase row with2 speaker turns and30s duration.
+  Supplied forged tenant B dynamic variables did not affect tenant A ownership.
+  Retained fictional fixture ID staging_d9ca306fd33e43f4a2b81777cc07fb6c for review.
+- Website API login works for admin/A/B. Admin organization API200; A sees its
+  fixture, B cannot see it. Logout revokes old merchant cookies (replay401),
+  relogin preserves correct visibility and persisted data. All sessions used by
+  the main test were signed out afterward.
+- Rechecked protection on new canonical deployment: no bypass401 protected,
+  bypass without signature401 Invalid signature, bypass+valid HMAC200 ignored.
+  These checks use synthetic ignored events, not an ElevenLabs-delivered call.
+- Tenant A temporarily uses fictional provider ID staging_transport_probe_A
+  for the synthetic test. Replace live mapping with the actual new A staging
+  Agent ID when supplied; old fictional ID stays reserved to tenant A by design.
+  Tenant B's provider ID remains blank. No real provider agent IDs reused.
+
+Still pending: actual ElevenLabs staging Agent ID A (B optional until second
+lane), provider webhook configured with clean endpoint plus
+x-vercel-protection-bypass header, a real fictional conversation and observed
+provider delivery. The user-supplied signing secret has been deployed, but its
+match to provider configuration is not proven until that delivery. Interactive
+browser UI remains unverified; dashboard APIs were tested, not rendered UI.
+
+Independent hosted verification passed (target wnajobvcldveajtdvbwg, deployed
+cf09b4c): retained synthetic fixture exactly1 row,2 turns,30s. A website login200
+and conversations200 sees fixture once; B login200/list200 does not see it.
+Revoked cookies401 for both. Protection bypass works. Independent pass created
+no product rows and revoked its own test sessions. Interactive browser UI and
+actual ElevenLabs-originated conversation remain unverified.
