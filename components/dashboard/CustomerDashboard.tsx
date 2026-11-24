@@ -13,6 +13,31 @@ import type {
 
 type DashboardIconName = "overview" | "calls" | "appointments" | "knowledge" | "profile" | "agent";
 
+type ConversationTranscriptTurn = {
+  role: string;
+  message: string;
+  time_in_call_secs?: number;
+};
+
+function readOptionalTranscript(conversation: Conversation): ConversationTranscriptTurn[] | undefined {
+  if (!("transcript" in conversation)) return undefined;
+  const raw = (conversation as Conversation & { transcript?: unknown }).transcript;
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+
+  const turns: ConversationTranscriptTurn[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    if (typeof record.role !== "string" || typeof record.message !== "string") continue;
+    const turn: ConversationTranscriptTurn = { role: record.role, message: record.message };
+    if (typeof record.time_in_call_secs === "number") {
+      turn.time_in_call_secs = record.time_in_call_secs;
+    }
+    turns.push(turn);
+  }
+  return turns.length > 0 ? turns : undefined;
+}
+
 function DashboardIcon({ name, className = "h-5 w-5" }: { name: DashboardIconName; className?: string }) {
   const common = { fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   return (
@@ -702,8 +727,41 @@ export function CustomerDashboard() {
                             {c.detected_intent || "一般諮詢"}
                           </span>
                         </td>
-                        <td className="p-4 max-w-xs truncate text-[#52525B]">
-                          {c.user_transcript || c.summary || "—"}
+                        <td className="p-4 max-w-xs text-[#52525B]">
+                          {(() => {
+                            const transcript = readOptionalTranscript(c);
+                            const summaryExcerpt = c.summary.trim();
+                            const legacyExcerpt = c.user_transcript.trim();
+                            const firstTurnExcerpt =
+                              transcript?.find((turn) => turn.message.trim())?.message.trim() ?? "";
+                            const excerpt =
+                              summaryExcerpt || legacyExcerpt || firstTurnExcerpt || "—";
+                            return (
+                              <details>
+                                <summary className="cursor-pointer truncate">{excerpt}</summary>
+                                <div className="mt-2 space-y-2 whitespace-normal break-words">
+                                  {c.summary ? <p>{c.summary}</p> : null}
+                                  {transcript ? (
+                                    <ul className="space-y-1">
+                                      {transcript.map((turn, index) => (
+                                        <li key={`${c.id}-turn-${index}`}>
+                                          {typeof turn.time_in_call_secs === "number"
+                                            ? `[${turn.time_in_call_secs}s] ${turn.role}: ${turn.message}`
+                                            : `${turn.role}: ${turn.message}`}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <>
+                                      {c.user_transcript ? <p>{c.user_transcript}</p> : null}
+                                      {c.ai_reply ? <p>{c.ai_reply}</p> : null}
+                                      {!c.summary && !c.user_transcript && !c.ai_reply ? <p>—</p> : null}
+                                    </>
+                                  )}
+                                </div>
+                              </details>
+                            );
+                          })()}
                         </td>
                         <td className="p-4">
                           <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold text-[11px]">

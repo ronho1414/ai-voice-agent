@@ -84,6 +84,10 @@ export type KnowledgeSource = {
 };
 
 export type Conversation = {
+  transcript?: { role: string; message: string; time_in_call_secs?: number }[];
+  analysis?: Record<string, unknown>;
+  started_at?: string | null;
+  ended_at?: string | null;
   id: string;
   organization_id: string;
   session_id: string;
