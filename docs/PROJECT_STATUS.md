@@ -173,3 +173,61 @@ Total: 35 passing (0 failures, 0 skipped)
 TypeScript check: PASSED (tsc --noEmit)
 Next.js Production Build: PASSED (24/24 static/dynamic routes generated)
 ```
+
+## ElevenLabs post-call transcription (feature branch, 2026-11-24)
+
+Implemented POST /api/webhooks/elevenlabs using the pinned official SDK and the
+unmodified request body, signature validation, 2 MiB input bound, strict MVP
+payload projection, and retryable 503 responses for persistence failures.
+Tenant ownership is resolved inside a service-role-only SQL function from the
+unique agents mapping. Provider conversation uniqueness makes concurrent retries
+idempotent; conflicting ownership is rejected. Existing rows and RLS remain.
+Dashboard transcript disclosures retain legacy conversation rendering.
+
+### Configuration and release steps
+
+1. Review migration 20261124055712_elevenlabs_post_call.sql in staging first.
+   Resolve duplicate non-empty agents.elevenlabs_agent_id mappings before applying.
+   No hosted migration was executed by this feature task.
+2. Provision each merchant's unique ElevenLabs agent ID in public.agents against
+   the correct active organization. Do not accept tenant IDs from dynamic variables.
+3. In ElevenLabs workspace settings create an HMAC post-call webhook targeting
+   https://<your-approved-domain>/api/webhooks/elevenlabs. Select transcription
+   events (post_call_transcription / transcript); leave audio and unredacted events
+   disabled. Confirm the intended agents use this webhook and enable retries.
+4. Copy its signing secret directly into Vercel Project > Settings > Environment
+   Variables as ELEVENLABS_WEBHOOK_SECRET for the intended environment. Keep the
+   Supabase URL and server-only SUPABASE_SERVICE_ROLE_KEY configured. Never prefix
+   the signing secret with NEXT_PUBLIC_. Preview and Production require their own
+   deliberate configuration. Redeployment requires separate approval.
+5. The route uses HMAC, not browser login/Origin checks. Ensure Vercel deployment
+   protection permits ElevenLabs requests to this one endpoint; do not disable
+   protection indiscriminately. Localhost cannot receive hosted deliveries.
+6. Enable provider-side transcript PII redaction and agree retention before real
+   callers. MVP stores conversation transcript text and summary, timing, channel,
+   provider IDs and call_successful flag only. It does NOT guarantee text contains
+   no personal information: no local semantic PII detector is claimed. No raw
+   payloads, dynamic variables, tool arguments, phone metadata, recordings or
+   data_collection_results are stored or logged. Additional analysis requires
+   explicit field review. Unknown mapped channels are currently web/phone only.
+7. After approved staging release, make a fictional test conversation. Verify
+   transcript and summary in tenant A, replay for one row, and verify tenant B
+   cannot read it. Recheck mapping changes before reusing agents for another tenant.
+
+Validation: official-SDK webhook unit tests pass (4/4). Full independent gate
+results will be appended before PR delivery. Real provider delivery, hosted
+migration, redaction configuration and browser UI are not yet verified.
+
+MVP limitations: the existing conversations list still returns full rows rather
+than a paginated summary/detail API. The local duplicate test uses one PGlite
+connection; production concurrent uniqueness is enforced by PostgreSQL's unique
+index, but multi-connection stress testing was not performed. Agent UI was
+implemented through Cursor Agent and reviewed by the implementation owner.
+vercel.json disables automatic deployments for codex/elevenlabs-post-call only,
+so pushing this review branch does not authorize or trigger a Vercel preview.
+
+Final independent verification: security 28/28, webhook 4/4, booking 8/8;
+typecheck, lint (0 errors, 9 existing warnings), build and diff check passed.
+Built HTTP smoke: homepage/beauty/dashboard 200, unauthenticated conversations
+401, missing webhook secret 503. No failing gate remains. Hosted migration,
+real provider delivery, redaction setup and interactive browser UI unverified.

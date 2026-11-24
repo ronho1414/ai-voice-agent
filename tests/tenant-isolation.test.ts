@@ -33,6 +33,7 @@ before(async () => {
     "20261123105304_auth_tenant_isolation.sql",
     "20261123110214_beauty_appointment_requests.sql",
     "20261123233500_update_appointment_transition.sql",
+    "20261124055712_elevenlabs_post_call.sql",
   ]) {
     const sql = await readFile(new URL(`../supabase/migrations/${file}`, import.meta.url), "utf8");
     // PGlite has gen_random_uuid built in; the pgcrypto extension is not needed.
@@ -146,4 +147,22 @@ test("revoked, expired, banned or anonymous Auth sessions cannot access data", a
 test("same-tenant foreign keys prevent cross-tenant appointment links even for service role", async () => {
   const { rows } = await db.query<{ id: string }>(`select id from public.conversations where organization_id='${orgB}'`);
   await assert.rejects(db.query(`update public.appointments set conversation_id=$1 where organization_id=$2`, [rows[0].id, orgA]), /appointments_conversation_tenant_fk/);
+});
+
+test('webhook ingestion maps tenants, deduplicates and keeps RLS', async () => {
+  await db.exec(`insert into auth.sessions(id,user_id) values ('${sessionId}','${userA}')`);
+  await db.exec(`insert into public.agents(organization_id,elevenlabs_agent_id) values ('${orgA}','agent_test_a'),('${orgB}','agent_test_b')`);
+  const call = {provider_agent_id:'agent_test_a',provider_conversation_id:'conv_test',channel:'web',duration_seconds:30,started_at:'2026-11-24T00:00:00Z',ended_at:'2026-11-24T00:00:30Z',transcript:[{role:'user',message:'fictional'}],summary:'test',analysis:{},organization_id:orgB};
+  const ingest = (payload:unknown) => db.query<{result:string}>('select public.ingest_elevenlabs_call($1::jsonb) as result',[JSON.stringify(payload)]);
+  await db.exec('set role service_role');
+  assert.equal((await ingest({...call,provider_agent_id:'unknown'})).rows[0].result,'unknown_agent');
+  await Promise.all([ingest(call),ingest(call)]);
+  await db.exec('reset role');
+  assert.equal((await asUser(userA,"select id from public.conversations where provider_conversation_id='conv_test'")).rows.length,1);
+  await assert.rejects(asUser(userB,"update public.conversations set summary='forged' where provider_conversation_id='conv_test' returning id"), /permission denied/);
+  assert.equal((await db.query("select id from public.conversations where provider_conversation_id='conv_test'")).rows.length,1);
+  assert.equal((await asUser(userB,"select id from public.conversations where provider_conversation_id='conv_test'")).rows.length,0);
+  await assert.rejects(ingest({...call,provider_agent_id:'agent_test_b'}),/ownership conflict/);
+  await assert.rejects(asUser(userB,`select public.ingest_elevenlabs_call('${JSON.stringify(call)}'::jsonb)`),/permission denied/);
+  await assert.rejects(db.exec(`insert into public.agents(organization_id,elevenlabs_agent_id) values ('${orgB}','agent_test_a')`),/unique/);
 });
