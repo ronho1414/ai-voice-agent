@@ -260,3 +260,188 @@ typecheck, lint (9 existing warnings), build, diff check and built HTTP smoke pa
 No failing local gate remains. Hosted migration/provider delivery, true concurrent
 connections and interactive browser UI remain unverified. Review branch automatic
 Vercel deployment remains disabled. No remote migration, merge or deployment run.
+
+## Staging readiness audit — 2026-11-24 (review baseline 4ae464c)
+
+### Verified read-only findings
+
+Hosted target inspected: jkzjluyldahlifufoiql. Treat as an existing environment,
+NOT as an isolated staging database. Supabase connector performed SELECT-only
+checks; no hosted schema, accounts, sessions or rows were modified.
+
+- Duplicate non-empty ElevenLabs agent ID groups: **0** at audit time.
+- agents/conversations/organizations all have RLS enabled. service_role has
+  SELECT/INSERT/UPDATE on each, sufficient for ingestion row locking and inserts.
+- Hosted conversations has the legacy columns but lacks provider/provider IDs,
+  transcript JSONB, analysis JSONB, started_at/ended_at. Both PR ingestion and
+  atomic provisioning RPCs are absent. PR #4 is NOT compatible until migrations.
+- Hosted migration history: 20261123112258 auth_tenant_isolation,
+  20261123112314 beauty_appointment_requests, 20261123233500. Earlier foundation
+  tables exist despite 001/002 not appearing in history. Do NOT blindly db push
+  local migration history onto this existing database or repair history here.
+- Super Admin profiles: **0**. Password-capable, non-banned Super Admins: **0**.
+  These are aggregates; no user email, password hash or credentials were output.
+- Supabase development branches: **none**. No branch/project has been created.
+- Existing Vercel origin https://ai-voice-agent-five-tau.vercel.app: GET /admin200,
+  GET /api/platform/auth/session200, unauthenticated conversations401. These
+  prove public availability/access rejection, NOT correct login or env values.
+- Vercel management connector is not installed, CLI is unavailable, no .vercel
+  project binding was found. Hosted env variable scopes, Supabase project target,
+  Auth keys, Auth Site URL/redirect allowlist and working admin login remain
+  UNVERIFIED. Public HTTP alone cannot verify these. Connect Vercel for read-only
+  metadata review or have an operator inspect the settings below; never paste keys.
+
+### Isolated staging plan and approval gates
+
+No cloud environment was provisioned: creation may incur billing and apply schema
+or deploy code, all outside the current no-remote-write boundary. Prepared local
+migration/tests/probe are ready; hosted staging is NOT ready or claimed created.
+
+1. Approve a separate Supabase project or persistent data-less branch named
+   orai-pr4-staging. Branches have separate credentials; explicitly exclude data
+   and storage cloning. Confirm costs and target project ref before creation.
+   Keep production/existing database credentials out of staging entirely.
+2. Disable automatic Git-to-Supabase migrations/branch merges and Vercel auto
+   deployments during preparation. PR branch vercel.json currently disables
+   codex/elevenlabs-post-call deployments. Keep that setting until a separately
+   approved manual deployment to a dedicated Vercel project orai-pr4-staging.
+3. On an EMPTY staging database only, apply migration files in order: 001,002,
+   20261123105304,20261123110214,20261123233500,20261124055712, then
+   20261124103151_immutable_agent_ownership.sql. Review CLI --help and dry-run
+   against the explicitly approved staging target before execution. Never use
+   the existing jkzjluyldahlifufoiql as the default linked target.
+4. Verify schema/indexes/RLS, service-role execution, and authenticated/anon RPC
+   denial. Any duplicate/ambiguous historical mapping must stop migration;
+   do not silently select an owner or delete conflicting rows.
+5. Provision fictional staging organizations A/B and separate Auth users plus
+   one Orai admin. profiles.id must match auth.users.id; admin system_role is
+   assigned only through trusted administration. Merchant memberships must be
+   active customer_admin and organizations active. Do not reuse production
+   users, passwords, agent IDs, telephone numbers or storage objects.
+6. Configure TWO dedicated ElevenLabs staging agents, one per tenant. No real
+   phone routing or customers. Authorize a manual staging deployment separately.
+7. Rollback: disable staging webhook first, revert application to previous
+   compatible version; preserve database evidence. Prefer forward fix. Never
+   drop columns, destroy ownership tombstones or run down-migrations on existing
+   environments as an automatic rollback. Staging teardown requires approval.
+
+### Agent ownership protection (local, not remotely applied)
+
+20261124103151 adds an RLS-protected provider-ID ownership registry, backfilled
+from current mappings AND historical conversations. A private SECURITY DEFINER
+trigger (fixed search_path, direct EXECUTE revoked) reserves each non-empty ID
+for its original tenant. Neither service-role API edits nor delete/clear and
+reinsert can move that ID to another tenant. Registry rows contain only IDs,
+no transcript/PII, deliberately survive merchant deletion (no cascading FK), and
+are inaccessible to authenticated/anon/service_role direct writes. Privileged
+DB owners can still bypass controls; access must remain restricted and audited.
+
+Never recycle provider agent IDs. Retired IDs remain reserved indefinitely;
+new merchants require new agents. A same-tenant reinstatement is allowed.
+Retired agents without a live mapping are ignored; delayed deliveries cannot
+be routed to a new tenant. Any pre-existing reassignment before registry setup
+without surviving historical evidence cannot be reconstructed: operator must
+attest inventory or replace such agents before real traffic.
+
+### Exact staging configuration checklist (after approval)
+
+Vercel dedicated staging project > Settings > Environment Variables:
+- NEXT_PUBLIC_SUPABASE_URL: isolated staging project URL.
+- NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY (or legacy NEXT_PUBLIC_SUPABASE_ANON_KEY):
+  SAME staging project's public key. Never use a service key here.
+- SUPABASE_SERVICE_ROLE_KEY: SAME staging project's server-only key.
+- ELEVENLABS_WEBHOOK_SECRET: generated signing secret for staging webhook only.
+- ORAI_BEAUTY_ORGANIZATION_SLUG: fictional staging slug if testing Beauty flow.
+- ELEVENLABS_API_KEY is unnecessary for verifying incoming webhooks; configure
+  a separate staging key only for separately approved outgoing ElevenLabs work.
+- ADMIN_PASSWORD and SESSION_SECRET do not authenticate current dashboards.
+Scope keys to the dedicated staging project's intended Preview/custom staging
+(or Production scope ONLY within that separate project), never Orai production.
+Changing variables needs an approved deployment before it takes effect.
+
+Supabase staging > Authentication > URL Configuration: Site URL is the fixed
+staging HTTPS origin. Allow only exact staging callback/reset destinations used
+by the app. Current email/password API does not use a redirect callback, so do
+not invent a route or broadly wildcard production redirects. Confirm email Auth
+is enabled, password-capable users are provisioned, admin role exists, sessions
+are HttpOnly/Secure and merchant/admin login/logout work end-to-end.
+
+ElevenLabs > Agents settings > Post-call webhooks: create staging HMAC webhook
+at https://<approved-staging-host>/api/webhooks/elevenlabs; store generated secret
+in Vercel without copying it into docs/logs. Enable transcription event
+post_call_transcription (agent override UI may call it transcript), enable
+retries and bind both staging agents to it. Disable audio, unredacted transcript,
+unredacted audio and all unrelated events. Ensure Vercel Deployment Protection
+permits this endpoint via a narrowly scoped supported exception/integration;
+HMAC remains mandatory. Do not globally remove protection. Confirm with a signed
+fictional delivery. Keep production webhook configuration untouched.
+
+### PII, retention and deletion acceptance requirements
+
+These are proposed release requirements, not a claim of implemented deletion:
+- Fictional-only staging now. No real caller names, phone numbers, HKID/payment,
+  medical details, recordings or production transcript copies. Summary and
+  transcript BOTH require redaction; tool arguments/dynamic variables/raw events
+  remain excluded. Logs contain only safe IDs/status, never content or secrets.
+- ElevenLabs history redaction is Enterprise-only per official docs. Confirm
+  entitlement and that redaction covers delivered webhook text/summary using
+  synthetic markers. If unavailable or webhook remains unredacted, block real
+  calls until application-side redaction is implemented and tested. Regex-only
+  masking is not proof that all sensitive free text is removed.
+- Proposed staging text retention: 7 days; proposed real-data text retention:
+  30 days, pending business approval. Disable provider audio saving. Configure
+  provider retention independently; database expiry is not provider deletion.
+- Before real traffic implement/schedule tenant-scoped expiry, explicit deletion
+  requests, and audit counts without transcript. Delete transcript, summary and
+  analysis in Orai AND the provider; invalidate caches/exports; define backup
+  expiry and restoration re-deletion. Limit actions to authorized staff.
+- Retain minimal conversation-ID deletion tombstones so retries do not resurrect
+  erased conversations. This is NOT yet implemented and blocks a real-data
+  deletion promise. Agent ownership tombstones must not be removed by text purge.
+- Deletion must respect linked appointment foreign keys; define retain/anonymize
+  policy for appointments separately instead of cascading customer data blindly.
+
+Sources: https://supabase.com/docs/guides/deployment/branching ;
+https://supabase.com/docs/guides/auth/redirect-urls ;
+https://elevenlabs.io/docs/eleven-agents/customization/privacy
+
+### Prepared fictional end-to-end acceptance matrix
+
+Use run-specific fixture IDs and record environment/ref/commit with evidence.
+After explicit staging-write approval, set STAGING_BASE_URL (HTTPS hostname must
+contain staging), STAGING_AGENT_ID, ELEVENLABS_WEBHOOK_SECRET and
+STAGING_TEST_APPROVED=fictional-data-only in a secure local shell, then run
+node scripts/staging-webhook-probe.mjs. The script was prepared, not executed
+against any hosted target. It sends one invalid HMAC and two valid duplicate
+fictional deliveries, prints statuses and a fixture ID, never the secret/body.
+
+[ ] Admin logs in and creates A/B with distinct dedicated agents; duplicate agent
+    attempt fails and creates neither partial merchant nor agent.
+[ ] Probe invalid401; valid/duplicate200; DB exactly one provider conversation,
+    tenant A ownership despite forged dynamic organization_id; transcript-only
+    row shows first non-empty message; full roles/duration/channel visible.
+[ ] A refresh/relogin retains row; B list/API cannot read or change A's row.
+[ ] Normal user/anon cannot invoke ingestion/provisioning RPC or ownership writes.
+[ ] Change A agent to B, clear/delete and recreate under B: all transfers rejected;
+    delayed original ID never lands in B. Same-tenant reinstatement allowed.
+[ ] Unknown agent200 ignored; malformed signed400; missing/invalid/expired HMAC401;
+    missing server config503; genuine transient staging failure503 then retry
+    persists once; permanent ownership conflict200 without changing owner.
+[ ] Actual fictional ElevenLabs call ends and analysis completes; real signed
+    webhook populates correct tenant. This validates provider interoperability,
+    unlike the synthetic HTTP probe alone.
+[ ] Synthetic PII markers are redacted in provider webhook, transcript AND summary;
+    audio absent; expiry/delete/replay-resurrection tests pass before real callers.
+[ ] Authorized cleanup only: remove fictional text/fixtures per recorded IDs,
+    retain agent ownership/deletion tombstones and aggregate evidence.
+
+Remaining blockers: staging provisioning/cost/target approval, Vercel settings
+access, missing hosted admin, unapplied feature migrations, redaction entitlement
+and coverage, retention/deletion machinery, approval for migration and staging
+deployment/test writes. No hosted E2E or real provider success is claimed.
+
+Final independent staging-preparation verification: security31/31, webhooks5/5,
+booking8/8, typecheck/lint/build/diff check pass (9 existing lint warnings).
+Local built HTTP smoke passes; staged probe syntax passes but no hosted probe
+executed. Extra local SQL probe rejects conflicting current/historical owners.
+New ownership protection is local code only until separately approved migration.
