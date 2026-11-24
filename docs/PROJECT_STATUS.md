@@ -1,6 +1,6 @@
 # Orai Service — Project Status & Security Review
 
-> Latest milestone (2026-11-25): PR #5 conflict-recovery fix7eb4588 is READY on https://orai-pr4-staging.vercel.app. Independent67-test gate and hosted Edge browser terminal-replay/failed-refresh/concurrent-completion/409 recovery passed. Managed-agent migration was applied in the earlier approved staging rollout. Production and PR merges remain unchanged; ElevenLabs configuration is unchanged. Earlier entries below are chronological.
+> Latest milestone (2026-11-25): PR #5 UI89f393c is READY on https://orai-pr4-staging.vercel.app. Customer/admin preferences now show only gender/style/greeting, with green change highlights. Independent23-test/type/lint/build/SSR gate and real staging browser checks passed. Historical data preserved; no new migration/provider change or production deployment. Prior staging/conflict-recovery milestones below remain chronological.
 
 **Date:** 2026-11-24  
 **Branch:** `main` (commit `a258a51`)  
@@ -1075,3 +1075,33 @@ Customer recovery: select「重新取得最新設定」if refresh failed, inspec
 and「保留修改後的提交預覽」, select「已覆核，保留我的修改」, then「提交調整要求」and
 「確認提交」. If an administrator updates again, repeat review; never reload to
 recover a draft. Unknown submission/transport errors keep the original retry key.
+
+## Dashboard preference simplification — 2026-11-25
+
+User removed voice character, speaking speed, response detail and preferred reply
+language from both dashboards. Shared edit forms, read-only snapshots/current/
+requested/final comparisons, conflict review and request summary/counts now show
+only voice gender, response style and greeting (plus the existing request notes).
+Changed selections, greetings and comparison values use green text/light green
+backgrounds; unchanged values retain their normal style.
+
+Historical JSON/schema are preserved; no migration is needed. When completing
+old requests, hidden legacy values are carried from the latest active snapshot
+instead of silently applying invisible historical requested values. Existing
+optimistic-version checks still protect the completion transaction.
+
+Independent verification: managed-agent23/23, typecheck and temporary SSR checks
+passed. SSR confirms exactly3kept fields, no4retired labels/controls, green changed
+values and normal unchanged values; hidden active values survive historical
+request completion projection. Final lint/build/staging results recorded below.
+
+Independent final result: managed-agent23/23, typecheck/lint/build and local HTTP
+checks passed (lint0errors/9pre-existing warnings). Unrelated security/webhook/
+booking suites were not repeated for this UI-only change. Staging code revision:
+89f393c; deployment dpl_Bp9eQxTLpWyBkgKv7rYqc78tTutZ READY at
+https://orai-pr4-staging.vercel.app . Real Edge headless acceptance passed on
+customer and admin: retired fields absent,3retained fields rendered, changed
+selection/comparison values green. Desktop screenshot visually inspected.
+No product data was submitted during this browser check; test sessions logged out.
+FAILED: none. NOT VERIFIED: physical mobile-device visual behavior in this pass.
+No migration, provider configuration, production deployment or PR merge.
