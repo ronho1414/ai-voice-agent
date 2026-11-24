@@ -1,6 +1,6 @@
 # Orai Service — Project Status & Security Review
 
-> Latest milestone (2026-11-24): PR #4 staging deployed at https://orai-pr4-staging.vercel.app on cf09b4c. First REAL ElevenLabs conversation synchronized and independently verified (82s, 13 turns, correct tenant, no audio). Existing production unchanged; main not merged. Sections below retain chronological prior audits and superseded blockers; see final entries for current results.
+> Latest milestone (2026-11-25): PR #5 conflict-recovery fix7eb4588 is READY on https://orai-pr4-staging.vercel.app. Independent67-test gate and hosted Edge browser terminal-replay/failed-refresh/concurrent-completion/409 recovery passed. Managed-agent migration was applied in the earlier approved staging rollout. Production and PR merges remain unchanged; ElevenLabs configuration is unchanged. Earlier entries below are chronological.
 
 **Date:** 2026-11-24  
 **Branch:** `main` (commit `a258a51`)  
@@ -864,3 +864,214 @@ interaction and hosted persistence for this unapproved migration. SQL tests use
 local PGlite and API transport is mocked, not proof of real Supabase sessions.
 No hosted migration, deployment, merge or production data change was performed.
 Existing real ElevenLabs staging integration was preserved and not reconfigured.
+
+## PR #5 isolated staging deployment and acceptance — 2026-11-25
+
+User explicitly approved this staging migration/deployment. No new paid resources
+or paid features were created. Existing project resources were reused:
+
+- Supabase: `wnajobvcldveajtdvbwg` (`orai-pr4-staging`).
+- Vercel project: `prj_jFozNUtpm9Ak2b4aDXOoXV3lS2Y0` (`orai-pr4-staging`).
+- Deployment: `dpl_5JMdKR8YL8bHwgFCzUyLhDVsi1dy`, READY, exact source
+  `912bad8e24afd0307a0bb7bf9e9d0f11a08a8111`.
+- Stable staging URL: https://orai-pr4-staging.vercel.app
+- Deployment URL: https://orai-pr4-staging-9trowjhxt-ronho1414.vercel.app
+- Existing webhook remains https://orai-pr4-staging.vercel.app/api/webhooks/elevenlabs
+  with its existing configured protection access and signing secret unchanged.
+
+Vercel calls this dedicated project's default target `production`; that is the
+ISOLATED STAGING PROJECT's stable domain, not the separate Orai production project.
+No request targeted the Orai production project/database. Both PRs remain unmerged.
+No agent mapping, ElevenLabs setting, webhook secret or Deployment Protection
+setting was changed. Feature branch automatic deployments remain disabled.
+
+### Migration and rollback readiness
+
+All seven dependency migrations were present. Source migration
+`20261124160158_managed_agent_requests.sql` was applied successfully. Its SHA256 is
+`b4be2226ef234822ff7b486197a58a7c1078f4328753d6fea19a6b595e0536cd`.
+MCP records it as `20261124164911 / managed_agent_requests` (server-generated
+migration timestamp; do not blindly reapply the local file using CLI db push).
+
+Before applying, a gitignored scoped snapshot captured the nine existing public
+business tables, agent ownership mappings, helper definitions and agents ACL at
+`data/pr5-pre-migration-backup.json`. Counts:2 organizations,3 profiles,2 agents,
+5 conversations,0 appointments. Snapshot is a local scoped backup, NOT a tested
+full PITR restore or Auth backup; no paid backup product was enabled.
+
+Rollback plan: retain additive tables/audit data, restore the prior STAGING app
+`dpl_Bd9tKqLHMa96EFAskbZ4He2szvbt` (cf09b4c), then diagnose/roll forward. Do not
+reset the DB or drop collected requests. Any destructive schema reversal requires
+separate review/approval and export of new data. No rollback was needed/performed.
+
+After migration: all5new tables have RLS; authenticated users cannot INSERT or
+UPDATE them; RPC is executable only by service_role (anon/authenticated denied).
+Authenticated reads cannot access agents.config or provider agent IDs.
+
+### Actual hosted API and database acceptance — PASSED
+
+- Real existing fictional A/B/Super Admin password login; A request persists
+  after logout/re-login and exact stored data agrees with deployed APIs.
+- Submit201, retry200/same ID, unchanged/forged-tenant validation rejected.
+  Active preferences unchanged through submission/information/processing; only
+  completion updates active preferences/version and final applied snapshot.
+- Information request/customer reply/private admin notes/completion flow; missing
+  confirmation rejected, cancelled/rejected/completed replay preserves real status.
+- Per-recipient notifications/unread counts, individual read and all-read persist;
+  B cannot mark A's notification read. Real pending summary counts verified.
+- B receives404 for A detail and cannot cancel/process A requests. Direct
+  authenticated Data API returns zero foreign requests/preferences/events/
+  notifications; customer notes remain hidden; direct mutation RPC denied.
+- Original5conversations retained. The real82s/13turn ElevenLabs conversation
+  `conv_0901m872wz6me4pbqq2ecdwc89nk` remains visible to A and hidden from B.
+- Fictional appointment `b2a6612c-3213-4883-8ec8-e13809337259` created for this
+  acceptance, listed/updated to confirmed and persisted; B cannot read/update it.
+- Webhook route accepts existing automation protection access and rejects an
+  unsigned request401. No new billable provider conversation was initiated.
+
+### Actual browser acceptance — PASSED
+
+Built-in browser/node REPL failed to initialize (kernel assets path missing).
+Temporary Playwright1.65.1 + installed Edge headless successfully verified the
+real deployed UI instead. No dependency/package-lock/product code was changed;
+protection header was scoped only to the staging origin and not printed.
+
+- Separate A/B/admin browser sessions, real login and dashboard navigation.
+- Customer confirmation back/cancel, real form submission, cancellation and
+  request history after browser reload.
+- Admin list/sidebar pending badge and notification bell/unread/read-all actions.
+  Background polling observed at15,002ms without a full reload.
+- Full browser sequence on REQ-000005: admin starts, requests information,
+  customer replies, admin resumes, reviews completion modal, checks confirmation
+  and completes; customer final values auto-refresh and persist after reload.
+- Completion button disabled before confirmation. Desktop and390px mobile render
+  checked, mobile has no horizontal overflow; screenshots stored locally ignored.
+
+Completion confirmation in these fictional staging fixtures is a QA INPUT ONLY.
+It verifies the Orai workflow and transaction; it is NOT evidence that someone
+actually updated or tested the ElevenLabs provider. Agent rows/provider config
+remain exactly equal to the pre-migration snapshot. Actual provider updates are
+outside this acceptance and were not performed.
+
+Final stored requests: REQ-000001 completed; REQ-000002 cancelled;
+REQ-000003 rejected; REQ-000004 cancelled; REQ-000005 completed. Active version2
+matches the latest completed final preferences. All request history is retained.
+
+### Independent gate and limitations
+
+Independent orai-test-runner separately verified hosted Auth/API/DB consistency,
+A/B API and RLS isolation, private note confidentiality, service-only RPC grants,
+persistent notification state, unchanged agent/provider config and old real call,
+and confirmed appointment ownership/status. Its test sessions were logged out.
+
+PASSED: hosted acceptance above. FAILED: no remaining product failures. A test
+harness initially used global logout and another typed into a form before the
+prior action settled; corrected harness sequencing/local logout passed on resume.
+Product code was not changed to pass these tests.
+
+The61local regression tests/typecheck/lint/build already passed for912bad8 and
+were not unnecessarily repeated during this unchanged-code rollout. Vercel build
+for912bad8 also completed successfully. Independent hosted verification is new.
+
+NOT VERIFIED: actual ElevenLabs manual configuration/update/test, paid-provider
+email delivery, scheduled overdue notification delivery, full backup restoration,
+and real-device/Safari/Firefox visual behavior. Email remains unconfigured and
+scheduled overdue reminders remain a documented future configuration step.
+No production data changes, merge or production deployment were performed.
+
+### Exact manual browser acceptance steps
+
+1. Open https://orai-pr4-staging.vercel.app/dashboard . If Vercel Authentication
+   appears, sign in with the existing authorized Vercel account. Do not disable
+   Deployment Protection or paste bypass secrets into URLs/screenshots.
+2. Use the existing password for `orai-staging-a@example.test`. Open 我的 AI 專員.
+   Check active values, select a different preference and add a clearly fictional
+   note. Submit → 返回修改 should save nothing; submit → 確認提交 creates one row.
+3. In a separate browser profile open https://orai-pr4-staging.vercel.app/admin
+   using `orai-staging-admin@example.test` and its existing password. Open 調整要求.
+   Without reload, wait up to20seconds for the new pending row/badge/bell count.
+4. Open the row, compare current/requested settings, 開始處理, add a private note,
+   enter a customer-visible reason and 要求補充資料. In A, open the notification or
+   request, fill 補充資料給 Orai and send. Confirm private notes never appear there.
+5. Admin starts again. Blank transition must preserve the previous Orai reply.
+   Before a REAL service change is marked complete, manually update/test the
+   isolated ElevenLabs agent yourself; only then confirm the manual-update box.
+   This rollout's existing completed QA rows do not prove that provider step.
+   Review final settings and 完成並套用; A should update without reload and retain
+   the completed request, response, timestamp and final preferences after login.
+6. Submit a separate fictional request and 取消此要求 while pending; refresh and
+   confirm history remains cancelled. Test another with admin rejection/reason.
+7. Open the bell: mark one/all read, refresh/re-login and verify read state persists.
+8. In another profile use `orai-staging-b@example.test` and its existing password.
+   A's request rows, notification references and conversations must not appear.
+9. In A open 通話紀錄 for the original real call, then 預約管理 to see the confirmed
+   FICTIONAL PR5 QA appointment. Repeat at mobile width; no real customer data.
+
+Passwords/bypass/signing secrets are not included here. All backup, credentials,
+test scripts, browser artifacts and result JSON remain gitignored under data/.
+
+## PR #5 stale-version recovery — 2026-11-25
+
+Bugbot issue: terminal replay retained the draft but a failed one-shot refresh or
+later admin completion left its base_version stale, with no safe in-app recovery.
+Fix commit: `7eb458833019cc33ced1ec276e0ed18b0ecc7206`.
+
+- Customer draft now owns distinct baseline/latest snapshots. Background polling
+  preserves unsaved preferences and notes, flags changed versions and closes an
+  outdated confirmation instead of silently rebasing/submitting.
+- Typed HTTP409 errors trigger an in-app review panel. Failed refresh keeps the
+  draft and blocks confirmation until a successful fresh fetch. Subsequent polls
+  or the retry button can recover without navigating/reloading.
+- Review shows the latest active values and a highlighted submission preview.
+  Explicit review carries only customer-edited fields onto the latest snapshot;
+  untouched fields adopt current active values. Overlapping edits stay visible.
+  Review checks the exact rendered version; another update requires re-review.
+- Terminal replay always enters this review flow. Confirmation allocates a fresh
+  idempotency key after review; unknown/network errors preserve the exact original
+  key/payload. No automatic re-POST or active setting update is performed.
+- Refresh epochs reject requests started before terminal/conflict/acceptance,
+  including old failures; lower-version responses cannot undo a newer snapshot.
+- SQL/RLS/idempotency validation remain unchanged. No new migration is needed.
+
+Independent verification PASSED: security31, webhook5, booking8, managed-agent23
+(67 tests total), typecheck, lint (0 errors/9 existing warnings), production build
+and local HTTP smoke. Six new regressions cover concurrent completions, failed
+refresh after terminal replay,409 recovery with another update, frozen retry
+payload/key, typed409 errors, and late pre-terminal refreshes. Initial epoch test
+fixture errors and an owned temporary helper lint failure were corrected without
+weakening assertions/rules.
+
+Staging regression PASSED on deployment
+`dpl_CodSb5bV11hQegyRodVbeqYPUuQk` (READY), exact7eb4588 source, existing
+isolated project/domain https://orai-pr4-staging.vercel.app/dashboard . Previous
+working deployment dpl_5JMdKR8YL8bHwgFCzUyLhDVsi1dy remains the rollback target.
+No new migration, paid resource or protection/secret setting was changed.
+
+Real deployed Edge headless test used fictional A/admin accounts and selectively
+injected transport failures (not fake persistence). It actually created/cancelled
+REQ-000007, replayed the same payload/key against its real terminal row, then
+blocked the refresh. The UI retained greeting/notes and blocked review until a
+fresh fetch succeeded. A real concurrent admin completion of REQ-000008 advanced
+active version2→3 while the customer held an older confirmation. The next real
+POST returned409; the UI preserved the draft, fetched current settings, displayed
+the comparison and required explicit review and another confirmation. REQ-000009
+then persisted with base_version3, a new idempotency key, the customer's greeting/
+notes and the newer untouched speaking-speed value. It was cancelled after the
+check to avoid leaving an open QA request. No full page reload was used.
+
+A final hosted SQL read confirmed these states/versions and active version3.
+Agent/provider configuration still exactly equals the pre-migration snapshot.
+The concurrent-completion confirmation was clearly marked fictional QA only;
+no actual ElevenLabs update/provider test was claimed or performed.
+
+PASSED: independent67test/type/lint/build/HTTP gate;3deployed browser regression
+scenarios and actual persisted rows. FAILED: no unresolved failures. NOT VERIFIED:
+real provider manual updates, email/scheduler delivery and full backup restoration
+remain outside scope. Earlier staging tests already verified tenant RLS, original
+conversations and appointment management; unchanged infrastructure was not audited
+again. Both PRs remain unmerged, production untouched.
+
+Customer recovery: select「重新取得最新設定」if refresh failed, inspect「最新生效設定」
+and「保留修改後的提交預覽」, select「已覆核，保留我的修改」, then「提交調整要求」and
+「確認提交」. If an administrator updates again, repeat review; never reload to
+recover a draft. Unknown submission/transport errors keep the original retry key.
