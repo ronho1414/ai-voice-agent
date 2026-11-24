@@ -1,5 +1,7 @@
 # Orai Service — Project Status & Security Review
 
+> Latest milestone (2026-11-24): PR #4 staging deployed at https://orai-pr4-staging.vercel.app on cf09b4c. First REAL ElevenLabs conversation synchronized and independently verified (82s, 13 turns, correct tenant, no audio). Existing production unchanged; main not merged. Sections below retain chronological prior audits and superseded blockers; see final entries for current results.
+
 **Date:** 2026-11-24  
 **Branch:** `main` (commit `a258a51`)  
 **Target:** `main`  
@@ -585,3 +587,113 @@ and conversations200 sees fixture once; B login200/list200 does not see it.
 Revoked cookies401 for both. Protection bypass works. Independent pass created
 no product rows and revoked its own test sessions. Interactive browser UI and
 actual ElevenLabs-originated conversation remain unverified.
+
+## Real staging Agent A mapping (2026-11-24)
+
+User supplied Agent A URL; extracted provider ID
+agent_7801m86m0v65fxw9n0twtx4ex54v (branch UI reference
+agtbrch_4401m86m0wdsfgp9rk4fq045nbe2 is not part of agent_id).
+Updated ONLY staging wnajobvcldveajtdvbwg merchant staging-salon-a draft/probe
+mapping to this supplied Agent A ID, status active. Ownership registry reserves
+it for tenant A. Existing synthetic probe ID remains reserved to A.
+
+Staging webhook signing secret and automation bypass are present locally;
+ELEVENLABS_API_KEY is absent from staging config, so provider agent settings,
+webhook selection and request_headers cannot yet be read/configured via API.
+No API key or webhook secret was requested in chat. Need provider-side staging
+webhook bound to this agent and x-vercel-protection-bypass configured before a
+real call, or a staging-scoped API key in ignored local config to complete that
+setup. Mapping success is NOT proof of provider-originated webhook delivery.
+
+Staging Agent B supplied and bound to staging-salon-b:
+agent_0501m86m1znrf7sbmedzj8yxvfy1. Read-back confirms A/B have distinct active
+provider IDs and both immutable registry owners match their own staging tenant.
+Production unchanged. Provider configuration and real call delivery still pending.
+
+## ElevenLabs API configuration attempt — actual permission blocker
+
+Local staging ELEVENLABS_API_KEY is now present. Read-only GET for both supplied
+Agent IDs returned401 missing_permissions; provider explicitly reports missing
+convai_read. Workspace webhook listing succeeds, but creating a dedicated
+staging webhook returns401 missing_permissions. No webhook was created/changed,
+no provider secret rotated, no Agent settings or workspace defaults were modified.
+
+Existing workspace webhook named ORAI Staging Webhook (22b0b02983704e80a3487364f1a561fd)
+points to the OLD ai-voice-agent-git-review-supabase-auth-audit-ronho1414.vercel.app
+endpoint, not orai-pr4-staging.vercel.app, with no active usages in returned list.
+Do not treat that callback as the new staging integration or change production
+workspace defaults. Need an API key with Agents read/write and workspace webhook
+create/update permission (convai_read was directly confirmed missing), restricted
+to staging resources where possible. Do not enable unrelated billing/deletion
+permissions or paste credentials into chat. Once fixed, continue dedicated
+webhook creation with bypass header, update its provider-generated signing secret
+in staging only, attach it to the two test agents, then perform a fictional call.
+
+## ElevenLabs permissions repaired and staging webhook configured
+
+Retry succeeded: specified Agent A/B reads now return200. Created dedicated
+ORAI PR4 Isolated Staging webhook f1da4e614ddb4542b687fb5ee3666532 at the correct
+https://orai-pr4-staging.vercel.app/api/webhooks/elevenlabs endpoint, HMAC auth,
+staging automation bypass request header and retries enabled. Existing old
+ORAI Staging Webhook and workspace-wide defaults were left unchanged.
+
+Updated ONLY the supplied staging branches:
+A agtbrch_4401m86m0wdsfgp9rk4fq045nbe2;
+B agtbrch_3801m86m20k5e8qvf3e35r6xg88g.
+Read-back confirms each overrides post_call_webhook_id to the dedicated staging
+webhook, events=[transcript], JSON full transcript, send_audio=false. Both had
+no assigned phone/WhatsApp channels. Disabled provider audio recording and set
+7-day retention for these agents, apply_to_existing_conversations=false. No
+existing conversation data deleted. Fictional data only; PII redaction still
+not enabled and does not qualify this environment for real customers.
+
+New provider-generated webhook secret was saved only to ignored staging env
+and encrypted Vercel staging env, replacing the older secret. Deployment
+ dpl_Bd9tKqLHMa96EFAskbZ4He2szvbt is building the same cf09b4c in the dedicated
+staging project to activate it. Wait for READY before testing actual provider
+post-call delivery. No Production project, other agent or global setting changed.
+
+Staging secret activation deployment dpl_Bd9tKqLHMa96EFAskbZ4He2szvbt reached
+READY; canonical https://orai-pr4-staging.vercel.app points to it. Official
+ElevenLabs Send Test Webhook Event was invoked ONCE for post_call_transcription:
+provider API200, outcome=delivered, endpoint response200 application/json,
+failure_origin=null, delivery f47469837e37442e98bd83f8ba6beb8a. This independently
+originated provider sample proves request_headers bypass + actual provider HMAC
+secret alignment. It is NOT a real conversation or proof of merchant call data.
+Next required human action: run Agent A Test Agent with fictional speech, end
+call, wait for analysis, then verify that provider conversation ID in staging A
+only. No billable automated conversation or simulation was initiated.
+
+## FIRST REAL ELEVENLABS STAGING CONVERSATION SYNCHRONIZED
+
+Conversation conv_0901m872wz6me4pbqq2ecdwc89nk completed by the user on Agent A
+agent_7801m86m0v65fxw9n0twtx4ex54v and automatically arrived in staging Supabase
+wnajobvcldveajtdvbwg. No manual ingestion/backfill was performed for this call.
+
+Verified against provider Get Conversation and deployed customer APIs:
+- Provider status done; tenant staging-salon-a; channel web; duration82 seconds.
+- 13 ordered transcript turns, including speaker roles/times; exact normalized
+  transcript comparison to provider PASS, exact summary comparison PASS.
+- Exactly1 stored provider conversation row; summary present.
+- Provider has_audio=false. No recording fetched or stored by Orai.
+- A deployed password login200 + conversations API200 sees the call exactly once
+  with transcript/summary. B deployed login200 + API200 sees zero matching calls.
+- Both test sessions logged out200. No conversation content, caller information,
+  credentials or cookies printed during checks; output contained only safe metadata.
+
+This is a REAL provider conversation, unlike earlier synthetic POST/test delivery.
+The first-conversation sync objective is achieved. Browser-rendered dashboard UI
+is still not independently exercised; API delivery to the existing dashboard is
+verified. Existing privacy restrictions remain: fictional-only staging,7-day
+provider retention, no audio; production rollout/deletion automation still needs
+its own approval and completion. No production project/database changed and no
+main merge. Independent focused verification is running; no repeat full audit.
+
+Independent focused real-call verification PASSED (exit0): exact single persisted
+row for conv_0901m872wz6me4pbqq2ecdwc89nk;82s/13turns/web; provider transcript and
+summary match; has_audio=false; deployed A login/list/logout200 sees1 call and
+B login/list/logout200 sees0. Only test Auth sessions created/revoked, no product
+writes. Interactive browser rendering and complete PII redaction remain unverified;
+this pass compares provider conversation data and deployed APIs, not a separate
+webhook delivery-log trace. No further audit/feature development required for
+this milestone. Production rollout remains unapproved.
