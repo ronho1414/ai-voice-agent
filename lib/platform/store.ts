@@ -202,22 +202,19 @@ export async function createOrganization(input: {
 
   const sb = supabaseAdmin();
   if (sb) {
-    const { data: orgData, error: orgErr } = await sb
-      .from("organizations")
-      .insert(newOrg)
-      .select()
-      .single();
-    if (orgErr) throw new Error(orgErr.message);
-
-    const { error: agentErr } = await sb.from("agents").insert(newAgent);
-    if (agentErr) console.error("Error creating agent row:", agentErr);
-
-    return orgData;
+    const { data, error } = await sb.rpc("create_organization_with_agent", {
+      organization_payload: newOrg, agent_payload: newAgent,
+    });
+    if (error || !data) throw new Error("商戶建立失敗，請確認代稱及 ElevenLabs Agent ID 未被使用。");
+    return data as Organization;
   }
 
   const store = await loadLocalStore();
   if (store.organizations.some((o) => o.slug === slug)) {
     throw new Error(`Slug「${slug}」已經被使用，請使用其他代稱。`);
+  }
+  if (newAgent.elevenlabs_agent_id && store.agents.some((a) => a.elevenlabs_agent_id === newAgent.elevenlabs_agent_id)) {
+    throw new Error("ElevenLabs Agent ID 已被使用。");
   }
   store.organizations.push(newOrg);
   store.agents.push(newAgent);

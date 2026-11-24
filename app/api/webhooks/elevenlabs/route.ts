@@ -9,6 +9,7 @@ export async function POST(request: Request) {
     const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
     const { data, error } = await db.rpc("ingest_elevenlabs_call", { payload: call });
     if (error) throw new Error("Persistence failed");
-    return String(data);
+    if (!["synced", "unknown_agent", "ownership_conflict"].includes(data)) throw new Error("Unexpected ingestion result");
+    return data as string;
   });
 }

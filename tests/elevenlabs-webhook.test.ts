@@ -9,3 +9,9 @@ test('official SDK validates raw-body HMAC and discards unapproved fields',async
 test('invalid, missing, old and tampered signatures never persist',async()=>{for(const req of [request(event,Math.floor(Date.now()/1000),true),request(event,1),new Request('http://localhost',{method:'POST',body:'{}'}),(()=>{const r=request();return new Request(r.url,{method:'POST',headers:r.headers,body:'{}'});})()]){assert.equal((await receiveWebhook(req,secret,async()=>{throw new Error('must not save');})).status,401);}});
 test('malformed signed payloads rejected; unrelated events ignored',async()=>{for(const value of [{type:'post_call_transcription',data:{}},{...event,data:{...event.data,transcript:[{role:'attacker',message:'bad'}]}}])assert.equal((await receiveWebhook(request(value),secret,async()=>assert.fail())).status,400);assert.equal((await receiveWebhook(request({type:'post_call_audio'}),secret,async()=>assert.fail())).status,200);});
 test('database errors return retryable failure and missing config fails closed',async()=>{assert.equal((await receiveWebhook(request(),secret,async()=>{throw new Error('db failure');})).status,503);assert.equal((await receiveWebhook(request(),undefined,async()=>assert.fail())).status,503);});
+
+test('permanent ownership rejections are acknowledged, transient failures remain retryable',async()=>{
+  const response=await receiveWebhook(request(),secret,async()=> 'ownership_conflict');
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{status:'ownership_conflict'});
+});

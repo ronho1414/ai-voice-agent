@@ -36,3 +36,15 @@ test("failed writes are never acknowledged as locally saved in production", asyn
 test("unavailable statistics are not reported as a genuine zero", async () => {
   await assert.rejects(countAllConversations(), /statistics are unavailable/);
 });
+
+test('organization provisioning propagates RPC errors without acknowledging partial success', async () => {
+  const { createOrganization } = await import('../lib/platform/store');
+  let requests=0;
+  globalThis.fetch=async (input)=>{
+    requests++;
+    assert.match(String(input),/\/rpc\/create_organization_with_agent$/);
+    return Response.json({message:'duplicate key',code:'23505'},{status:409});
+  };
+  await assert.rejects(createOrganization({name:'Fictional',slug:'fictional',elevenlabsAgentId:'duplicate'}),/商戶建立失敗/);
+  assert.equal(requests,1);
+});

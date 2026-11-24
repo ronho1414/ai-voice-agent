@@ -231,3 +231,32 @@ typecheck, lint (0 errors, 9 existing warnings), build and diff check passed.
 Built HTTP smoke: homepage/beauty/dashboard 200, unauthenticated conversations
 401, missing webhook secret 503. No failing gate remains. Hosted migration,
 real provider delivery, redaction setup and interactive browser UI unverified.
+
+## PR #4 Bugbot follow-up (2026-11-24)
+
+- Ownership conflicts now return the permanent `ownership_conflict` result with
+  HTTP 200, preserving the existing owner and preventing retry storms. Genuine
+  RPC/database failures still return 503. RPC results are checked against the
+  accepted result set before acknowledgement.
+- createOrganization now provisions organization and agent via one service-only,
+  SECURITY INVOKER PostgreSQL RPC. Constraint failures roll back the whole call;
+  the application propagates errors instead of logging and reporting success.
+  Local development also rejects duplicate non-empty provider agent IDs.
+- Dashboard excerpt falls back to the first non-empty transcript turn, after
+  trimmed summary and legacy text.
+- Removed redundant service-role table grants from the pending feature migration.
+  Existing auth-isolation migration supplies table privileges; both RPCs revoke
+  PUBLIC/anon/authenticated execution and explicitly grant only service_role.
+- Regression tests cover permanent acknowledgement, transient failure, immutable
+  ownership, service-role provisioning, duplicate-agent/invalid-agent rollback,
+  organization failure without orphan agents, and anonymous/authenticated RPC denial.
+  No remote migration was executed. Apply the reviewed feature migration before
+  releasing application code that calls create_organization_with_agent.
+
+Initial targeted results: security 30/30, webhooks 5/5. Independent full gate pending.
+
+Final independent Bugbot-fix gate: security 30/30, webhooks 5/5, booking 8/8;
+typecheck, lint (9 existing warnings), build, diff check and built HTTP smoke pass.
+No failing local gate remains. Hosted migration/provider delivery, true concurrent
+connections and interactive browser UI remain unverified. Review branch automatic
+Vercel deployment remains disabled. No remote migration, merge or deployment run.

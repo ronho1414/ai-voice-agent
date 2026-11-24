@@ -730,7 +730,12 @@ export function CustomerDashboard() {
                         <td className="p-4 max-w-xs text-[#52525B]">
                           {(() => {
                             const transcript = readOptionalTranscript(c);
-                            const excerpt = c.summary || c.user_transcript || "—";
+                            const summaryExcerpt = c.summary.trim();
+                            const legacyExcerpt = c.user_transcript.trim();
+                            const firstTurnExcerpt =
+                              transcript?.find((turn) => turn.message.trim())?.message.trim() ?? "";
+                            const excerpt =
+                              summaryExcerpt || legacyExcerpt || firstTurnExcerpt || "—";
                             return (
                               <details>
                                 <summary className="cursor-pointer truncate">{excerpt}</summary>

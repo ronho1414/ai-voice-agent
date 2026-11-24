@@ -27,12 +27,26 @@ begin
   on conflict(provider,provider_conversation_id) do nothing;
   select * into existing from public.conversations where provider='elevenlabs' and provider_conversation_id=payload->>'provider_conversation_id';
   if existing.organization_id <> tenant or existing.provider_agent_id <> payload->>'provider_agent_id' then
-    raise exception 'Conversation ownership conflict';
+    return 'ownership_conflict';
   end if;
   return 'synced';
 end $$;
 revoke all on function public.ingest_elevenlabs_call(jsonb) from public,anon,authenticated;
 grant execute on function public.ingest_elevenlabs_call(jsonb) to service_role;
-grant select,insert on public.conversations to service_role;
-grant select on public.agents,public.organizations to service_role;
-grant update(id) on public.agents,public.organizations to service_role;
+
+-- Table privileges already exist in auth_tenant_isolation. No extra grants needed.
+-- One RPC transaction prevents an agent constraint failure leaving an orphan org.
+create function public.create_organization_with_agent(organization_payload jsonb, agent_payload jsonb)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare created public.organizations;
+begin
+  if (agent_payload->>'organization_id')::uuid is distinct from (organization_payload->>'id')::uuid then
+    raise exception 'Agent organization mismatch';
+  end if;
+  insert into public.organizations select (jsonb_populate_record(null::public.organizations, organization_payload)).*
+    returning * into created;
+  insert into public.agents select (jsonb_populate_record(null::public.agents, agent_payload)).*;
+  return to_jsonb(created);
+end $$;
+revoke all on function public.create_organization_with_agent(jsonb,jsonb) from public,anon,authenticated;
+grant execute on function public.create_organization_with_agent(jsonb,jsonb) to service_role;
