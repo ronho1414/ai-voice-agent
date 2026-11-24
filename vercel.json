@@ -2,7 +2,8 @@
   "regions": ["hkg1"],
   "git": {
     "deploymentEnabled": {
-      "codex/elevenlabs-post-call": false
+      "codex/elevenlabs-post-call": false,
+      "codex/managed-agent-requests": false
     }
   }
 }

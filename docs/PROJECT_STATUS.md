@@ -697,3 +697,129 @@ writes. Interactive browser rendering and complete PII redaction remain unverifi
 this pass compares provider conversation data and deployed APIs, not a separate
 webhook delivery-log trace. No further audit/feature development required for
 this milestone. Production rollout remains unapproved.
+
+## Managed AI preferences and change requests — implementation (2026-11-24)
+
+Branch: `codex/managed-agent-requests`, stacked on unmerged PR #4
+(`codex/elevenlabs-post-call`, base412a3f6). This entry supersedes earlier claims
+that customers can edit AI instructions. No hosted migration or deployment has
+been performed for this feature. Existing staging continues running the previous
+version. Vercel git deployments are disabled for this feature branch.
+
+### Implemented
+
+- `/dashboard` → 我的 AI 專員: safe agent summary with unknown status/voice/hours
+  explicitly awaiting confirmation; no provider ID, prompt editor or security
+  claims. Voice/service preferences, dynamic Cantonese style examples,300-character
+  greeting and2,000-character service notes. Active values shown separately from
+  drafts; confirmation, duplicate guards, real API error/success states and history.
+- `/admin` → 調整要求: persistent pending count, four summary counts, merchant-name
+  search, status filter, date sort,20-row pagination, overdue indicator, assigned
+  administrator and update times. Detail shows active/requested/snapshot/final
+  settings, audit events, private notes, customer response and manual workflow.
+- Customer admins submit/cancel pending/respond to requests for information.
+  Super Admin starts, requests information, rejects with reasons or completes.
+  Completion requires explicit manual provider update/test confirmation and final
+  preferences. No ElevenLabs configuration API calls or prompt injection path.
+- Both dashboards have persistent per-user notifications, unread totals, individual
+  and all-read actions, request navigation and15-second background refresh.
+- Legacy `agents.config.customer_instructions` retained, accessible to trusted
+  administrative code only. Authenticated Data API column grants now exclude
+  `agents.config` and `elevenlabs_agent_id`; admin server APIs use service role.
+
+### Database and authorization
+
+Migration: `supabase/migrations/20261124160158_managed_agent_requests.sql`.
+Creates `agent_preferences`, `agent_change_requests`,
+`agent_change_request_events`, `agent_change_request_internal_notes` and
+`notifications`, with tenant FKs, enum/text constraints, indexes and read RLS.
+Active settings begin unknown rather than inventing deployed settings; future
+curated voice catalogue identifier reserved without implementing audio previews.
+Current MVP chooses one primary agent per tenant deterministically (created_at,id).
+An explicit agent selector would need a separate multi-agent product decision.
+
+`managed_agent_command` is SECURITY INVOKER and executable only by service_role.
+Next.js validates Supabase Auth/session/origin and derives actor/tenant before
+calling it; the function rechecks database roles and active admin membership.
+Authenticated users cannot directly mutate these tables or invoke this RPC.
+Internal notes have a separate Super Admin-only policy and never enter public
+history/events/customer responses.
+
+Per-tenant preference locks serialize submissions/completions. Idempotency keys
+bind to the original payload and version; identical open requests rejected.
+Request optimistic versions prevent stale actions. Final activation, completion,
+audit event and notifications share one transaction. Stale preference snapshots
+require explicit administrator review; reviewed active version is compared under
+lock to prevent overwriting another administrator's newer activation.
+
+### Configuration and limitations
+
+- Reuses existing server-only SUPABASE_SERVICE_ROLE_KEY and existing public
+  Supabase Auth environment variables. No new secrets/provider costs.
+- Migration must be reviewed and approved separately before applying to isolated
+  staging, after PR #4 migrations. Do not execute against production.
+- No configured email provider or scheduling mechanism found in repository.
+  `lib/platform/change-request-email.ts` provides an explicit not-configured adapter;
+  EMAIL DELIVERY IS NOT IMPLEMENTED. No external paid service introduced.
+- Overdue requests show indicators after24h. Scheduled one-time overdue admin
+  notifications require an approved scheduler (deduplicate by request/reminder key);
+  no claim of background scheduled delivery in this release.
+- Preferences describe human service requests; they never execute as prompts.
+  Actual provider changes/tests remain manual and must precede completion.
+- DB constraints/RLS exercised with local PGlite Postgres and fictional users.
+  Mocked API transport tests are not evidence of hosted Auth or persistence.
+  Hosted migration, browser acceptance and notification refresh across real
+  concurrent sessions remain NOT VERIFIED until approved staging rollout.
+
+### Manual staging acceptance checklist (requires separate approval)
+
+1. Review stacked PR dependency and database backup/rollback strategy. Apply this
+   additive migration only to isolated staging; keep production untouched.
+2. Verify service_role-only RPC grants and customer agent column restrictions.
+   Sign in as fictional Super Admin, merchant A/B and a read-only role.
+3. A changes preferences/notes: cancel confirmation, confirm once, double-click,
+   retry same delivery, refresh/re-login; verify exactly one persisted request,
+   unchanged active preferences, real history and recipient-specific notifications.
+4. B cannot list/read/cancel/respond to A's request or mark A's notifications.
+   Read-only roles cannot submit/cancel/process. Customer cannot submit status,
+   tenant, actor, internal note or final-setting fields via forged requests.
+5. Admin starts, requests info (reason required), A responds; admin private notes
+   invisible in customer JSON and direct authenticated Data API queries.
+6. Manually update/test the isolated ElevenLabs agent. Review final values and
+   explicit confirmation; complete and check active preferences/request/audit/
+   notifications persisted together after refresh/re-login.
+7. Open two requests on the same snapshot; complete one, ensure the older needs
+   explicit review. Simultaneous admins must receive409 for outdated versions.
+8. Reject with reason and cancel a pending request; preserve all history. Mark
+   notifications read/all-read; verify15s refresh and persistence in another session.
+9. Exercise desktop/mobile dialogs, keyboard focus, errors/loading/empty states.
+   Verify previous real-call transcript and appointment workflows still work.
+10. Configure an email provider/scheduler separately only if approved; until then
+    validate in-app notifications and overdue indicators without claiming email.
+
+### Independent verification result
+
+Independent orai-test-runner completed against this feature working tree:
+
+- PASSED: security31/31, webhook5/5, booking8/8 and managed-agent14/14
+  (58 tests total). Managed-agent tests cover local SQL/RLS persistence,
+  authorization, malformed payloads, duplicate/unchanged requests, cancellation,
+  information/rejection transitions, private notes, per-recipient read state,
+  stale request/reviewed-active versions and atomic rollback if notifications fail.
+- PASSED: typecheck, lint (0 errors;9 pre-existing warnings in unrelated voice/
+  widget files), production build and git diff whitespace check. A transient
+  Windows EPERM during a build rerun resolved on retry; final build exit0.
+- PASSED: independent owned production-server HTTP smoke, both localhost and
+  127.0.0.1: /, /beauty, /dashboard, /admin returned200. New authenticated APIs
+  returned401 without login; same-origin request POST401; foreign/missing origin
+  POST403; retired customer agent PATCH405. Own smoke server was stopped.
+- FAILED: no remaining automated check failures.
+- NOT VERIFIED: authenticated interactive browser UI, real hosted persistence and
+  cross-tenant workflow for this new migration, multi-session15s browser refresh,
+  actual manual ElevenLabs configuration changes, email/scheduled delivery.
+  Hosted migration/deployment remains intentionally unperformed and requires
+  approval. Existing webhook/auth/booking regression tests passed; this feature
+  did not re-run a billable live provider conversation.
+
+No secrets or local data/config were staged. Unrelated .codex files preserved.
+No merge, hosted migration, production data change, deployment or added cost.

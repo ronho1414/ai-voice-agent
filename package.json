@@ -11,7 +11,8 @@
     "test:security": "node --import tsx --test tests/auth-api.test.ts tests/tenant-isolation.test.ts tests/production-data.test.ts",
     "test:booking": "node --import tsx --test tests/beauty-booking.test.ts",
     "generate:clips": "tsx scripts/generate-clips.ts",
-    "test:webhooks": "node --import tsx --test tests/elevenlabs-webhook.test.ts"
+    "test:webhooks": "node --import tsx --test tests/elevenlabs-webhook.test.ts",
+    "test:managed-agent": "node --import tsx --test tests/managed-agent.test.ts tests/managed-agent-api.test.ts"
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "2.79.0",

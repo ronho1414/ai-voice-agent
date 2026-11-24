@@ -10,6 +10,7 @@ import type {
   KnowledgeSource,
   SourceType,
 } from "@/lib/platform/types";
+import { CustomerAgentPanel, NotificationBell } from "@/components/managed-agent";
 
 type DashboardIconName = "overview" | "calls" | "appointments" | "knowledge" | "profile" | "agent";
 
@@ -77,21 +78,20 @@ export function CustomerDashboard() {
   const [profMonFri, setProfMonFri] = useState("");
   const [profSatSun, setProfSatSun] = useState("");
 
-  // Agent State
-  const [agentInfo, setAgentInfo] = useState<{
-    status: string;
-    name: string;
-    voice_name: string;
-    language_mode: string;
-    is_connected: boolean;
-    agent_id_preview?: string;
-    customer_instructions: string;
-  } | null>(null);
-  const [agentInstructions, setAgentInstructions] = useState("");
+  const [focusRequestId, setFocusRequestId] = useState<string | null>(null);
 
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+
+  const openManagedRequest = useCallback((requestId: string) => {
+    setFocusRequestId(requestId);
+    setTab("agent");
+  }, []);
+
+  const clearFocusRequest = useCallback(() => {
+    setFocusRequestId(null);
+  }, []);
 
   // Check auth session on mount
   useEffect(() => {
@@ -152,15 +152,6 @@ export function CustomerDashboard() {
             setProfMonFri(p.opening_hours?.mon_fri || "");
             setProfSatSun(p.opening_hours?.sat_sun || "");
           }
-        }
-      }
-      if (tab === "agent") {
-        const res = await fetch("/api/platform/customer/agent", { cache: "no-store" });
-        if (!res.ok) throw new Error("無法載入資料，請稍後重試；目前顯示並非最新數據。");
-        if (res.ok) {
-          const body = await res.json();
-          setAgentInfo(body.agent || null);
-          setAgentInstructions(body.agent?.customer_instructions || "");
         }
       }
     } catch (err) {
@@ -379,27 +370,6 @@ export function CustomerDashboard() {
     }
   }
 
-  async function handleSaveAgentInstructions(e: FormEvent) {
-    e.preventDefault();
-    setBusy("agent_save");
-    setError("");
-    setSuccessMsg("");
-    try {
-      const res = await fetch("/api/platform/customer/agent", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customer_instructions: agentInstructions }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || "儲存 AI 專員指示失敗");
-      setSuccessMsg("AI 專員指示已儲存。ElevenLabs API 接駁後即可同步設定。");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "儲存失敗");
-    } finally {
-      setBusy("");
-    }
-  }
-
   if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#FAFAFA] text-[#52525B]">
@@ -567,7 +537,7 @@ export function CustomerDashboard() {
             }`}
           >
             <DashboardIcon name="agent" />
-            <span>語音專員狀態 (Agent Info)</span>
+            <span>我的 AI 專員</span>
           </button>
         </nav>
 
@@ -586,7 +556,10 @@ export function CustomerDashboard() {
       <main className="flex-1 p-6 sm:p-10 max-w-6xl w-full">
         <div className="mb-7 flex items-center justify-between gap-4">
           <div className="font-bold text-base">Orai 客戶管理後台</div>
-          <span className="rounded-full bg-sky-100 px-3 py-1 text-[11px] font-bold text-sky-700">商戶專屬</span>
+          <div className="flex items-center gap-3">
+            <NotificationBell onOpenRequest={openManagedRequest} />
+            <span className="rounded-full bg-sky-100 px-3 py-1 text-[11px] font-bold text-sky-700">商戶專屬</span>
+          </div>
         </div>
         {error && (
           <div className="mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
@@ -1203,80 +1176,11 @@ export function CustomerDashboard() {
           </div>
         )}
 
-        {/* 5. AGENT INFO TAB */}
         {tab === "agent" && (
-          <div className="space-y-6">
-            <header>
-              <h1 className="text-2xl font-extrabold tracking-tight">AI 專員狀態</h1>
-              <p className="text-xs text-[#52525B] mt-1">
-                檢視已接駁的 Orai 智能語音專員配置資訊。
-              </p>
-            </header>
-
-            <div className="p-6 rounded-3xl bg-white border border-[#E4E4E7] shadow-stripe-sm max-w-2xl space-y-4">
-              <div className="flex items-center justify-between pb-4 border-b border-[#E4E4E7]">
-                <div>
-                  <div className="font-extrabold text-base">{agentInfo?.name || "AI 專員"}</div>
-                  <div className="text-xs text-[#52525B] mt-0.5">Orai Managed Voice Service</div>
-                </div>
-                <span
-                  className={`px-3 py-1 rounded-full text-xs font-bold ${
-                    agentInfo?.status === "active"
-                      ? "bg-emerald-100 text-emerald-800"
-                      : "bg-slate-100 text-slate-600"
-                  }`}
-                >
-                  {agentInfo?.status === "active" ? "正常服務中" : "未啟用"}
-                </span>
-              </div>
-
-              <div className="space-y-3 text-xs">
-                <div className="flex justify-between py-1 border-b border-slate-100">
-                  <span className="text-[#52525B]">支援語言</span>
-                  <span className="font-bold">三語對答（地道廣東話、英語、普通話）</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-100">
-                  <span className="text-[#52525B]">聲線音色</span>
-                  <span className="font-bold">香港粵語女性（專業親切前台）</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-100">
-                  <span className="text-[#52525B]">ElevenLabs 連接識別碼</span>
-                  <span className="font-mono bg-slate-100 px-2 py-0.5 rounded text-[11px]">
-                    {agentInfo?.agent_id_preview || "已加密隱藏"}
-                  </span>
-                </div>
-                <div className="flex justify-between py-1">
-                  <span className="text-[#52525B]">安全隔離等級</span>
-                  <span className="font-bold text-emerald-700">獨立加密知識庫隔離</span>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-[#FAFAFA] border border-[#E4E4E7] text-[11px] text-[#71717A] leading-relaxed">
-                商戶可自行編輯 AI 專員的回答指示。聲線及 ElevenLabs Agent ID 仍由管理員設定。
-              </div>
-            </div>
-
-            <form onSubmit={handleSaveAgentInstructions} className="max-w-2xl space-y-4 rounded-3xl border border-[#E4E4E7] bg-white p-6 shadow-stripe-sm">
-              <div>
-                <h2 className="font-extrabold text-base">AI 專員回答指示</h2>
-                <p className="mt-1 text-xs leading-relaxed text-[#71717A]">描述語氣、回答方式、服務重點或需要避免的內容。現階段會安全儲存到商戶設定；接駁 ElevenLabs API 後再同步到 Agent。</p>
-              </div>
-              <textarea
-                rows={9}
-                maxLength={20000}
-                value={agentInstructions}
-                onChange={(event) => setAgentInstructions(event.target.value)}
-                placeholder={"例如：\n請以親切、專業的香港廣東話回答。\n先了解客人需要，再介紹合適服務。\n未能確認價錢或預約時，請邀請客人聯絡店舖。"}
-                className="w-full resize-y rounded-xl border border-[#E4E4E7] px-4 py-3 text-sm leading-relaxed focus:border-[#09090B] focus:outline-none"
-              />
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-[11px] text-[#71717A]">{agentInstructions.length.toLocaleString()} / 20,000 字元</span>
-                <button type="submit" disabled={busy === "agent_save"} className="rounded-xl bg-[#09090B] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#27272A] disabled:opacity-50">
-                  {busy === "agent_save" ? "儲存中…" : "儲存 AI 指示"}
-                </button>
-              </div>
-            </form>
-          </div>
+          <CustomerAgentPanel
+            initialRequestId={focusRequestId}
+            onRequestHandled={clearFocusRequest}
+          />
         )}
       </main>
     </div>
