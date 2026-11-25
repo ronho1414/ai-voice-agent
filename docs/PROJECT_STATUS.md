@@ -1,6 +1,6 @@
 # Orai Service — Project Status & Security Review
 
-> Latest milestone (2026-11-24): PR #4 staging deployed at https://orai-pr4-staging.vercel.app on cf09b4c. First REAL ElevenLabs conversation synchronized and independently verified (82s, 13 turns, correct tenant, no audio). Existing production unchanged; main not merged. Sections below retain chronological prior audits and superseded blockers; see final entries for current results.
+> Latest milestone (2026-11-25): PR #5 duplicate409 fix560b6d8 is READY on the existing isolated staging. Independent71-test/type/lint/build gate and real Edge duplicate/stale-code/tenant browser regressions passed. Three-field green UI is preserved. Separately, explicitly approved staging admin password sync from local env was verified with real Auth/app/admin access. No production changes or PR merge.
 
 **Date:** 2026-11-24  
 **Branch:** `main` (commit `a258a51`)  
@@ -697,3 +697,492 @@ writes. Interactive browser rendering and complete PII redaction remain unverifi
 this pass compares provider conversation data and deployed APIs, not a separate
 webhook delivery-log trace. No further audit/feature development required for
 this milestone. Production rollout remains unapproved.
+
+## Managed AI preferences and change requests — implementation (2026-11-24)
+
+Branch: `codex/managed-agent-requests`, stacked on unmerged PR #4
+(`codex/elevenlabs-post-call`, base412a3f6). This entry supersedes earlier claims
+that customers can edit AI instructions. No hosted migration or deployment has
+been performed for this feature. Existing staging continues running the previous
+version. Vercel git deployments are disabled for this feature branch.
+
+### Implemented
+
+- `/dashboard` → 我的 AI 專員: safe agent summary with unknown status/voice/hours
+  explicitly awaiting confirmation; no provider ID, prompt editor or security
+  claims. Voice/service preferences, dynamic Cantonese style examples,300-character
+  greeting and2,000-character service notes. Active values shown separately from
+  drafts; confirmation, duplicate guards, real API error/success states and history.
+- `/admin` → 調整要求: persistent pending count, four summary counts, merchant-name
+  search, status filter, date sort,20-row pagination, overdue indicator, assigned
+  administrator and update times. Detail shows active/requested/snapshot/final
+  settings, audit events, private notes, customer response and manual workflow.
+- Customer admins submit/cancel pending/respond to requests for information.
+  Super Admin starts, requests information, rejects with reasons or completes.
+  Completion requires explicit manual provider update/test confirmation and final
+  preferences. No ElevenLabs configuration API calls or prompt injection path.
+- Both dashboards have persistent per-user notifications, unread totals, individual
+  and all-read actions, request navigation and15-second background refresh.
+- Legacy `agents.config.customer_instructions` retained, accessible to trusted
+  administrative code only. Authenticated Data API column grants now exclude
+  `agents.config` and `elevenlabs_agent_id`; admin server APIs use service role.
+
+### Database and authorization
+
+Migration: `supabase/migrations/20261124160158_managed_agent_requests.sql`.
+Creates `agent_preferences`, `agent_change_requests`,
+`agent_change_request_events`, `agent_change_request_internal_notes` and
+`notifications`, with tenant FKs, enum/text constraints, indexes and read RLS.
+Active settings begin unknown rather than inventing deployed settings; future
+curated voice catalogue identifier reserved without implementing audio previews.
+Current MVP chooses one primary agent per tenant deterministically (created_at,id).
+An explicit agent selector would need a separate multi-agent product decision.
+
+`managed_agent_command` is SECURITY INVOKER and executable only by service_role.
+Next.js validates Supabase Auth/session/origin and derives actor/tenant before
+calling it; the function rechecks database roles and active admin membership.
+Authenticated users cannot directly mutate these tables or invoke this RPC.
+Internal notes have a separate Super Admin-only policy and never enter public
+history/events/customer responses.
+
+Per-tenant preference locks serialize submissions/completions. Idempotency keys
+bind to the original payload and version; identical open requests rejected.
+Request optimistic versions prevent stale actions. Final activation, completion,
+audit event and notifications share one transaction. Stale preference snapshots
+require explicit administrator review; reviewed active version is compared under
+lock to prevent overwriting another administrator's newer activation.
+
+### Configuration and limitations
+
+- Reuses existing server-only SUPABASE_SERVICE_ROLE_KEY and existing public
+  Supabase Auth environment variables. No new secrets/provider costs.
+- Migration must be reviewed and approved separately before applying to isolated
+  staging, after PR #4 migrations. Do not execute against production.
+- No configured email provider or scheduling mechanism found in repository.
+  `lib/platform/change-request-email.ts` provides an explicit not-configured adapter;
+  EMAIL DELIVERY IS NOT IMPLEMENTED. No external paid service introduced.
+- Overdue requests show indicators after24h. Scheduled one-time overdue admin
+  notifications require an approved scheduler (deduplicate by request/reminder key);
+  no claim of background scheduled delivery in this release.
+- Preferences describe human service requests; they never execute as prompts.
+  Actual provider changes/tests remain manual and must precede completion.
+- DB constraints/RLS exercised with local PGlite Postgres and fictional users.
+  Mocked API transport tests are not evidence of hosted Auth or persistence.
+  Hosted migration, browser acceptance and notification refresh across real
+  concurrent sessions remain NOT VERIFIED until approved staging rollout.
+
+### Manual staging acceptance checklist (requires separate approval)
+
+1. Review stacked PR dependency and database backup/rollback strategy. Apply this
+   additive migration only to isolated staging; keep production untouched.
+2. Verify service_role-only RPC grants and customer agent column restrictions.
+   Sign in as fictional Super Admin, merchant A/B and a read-only role.
+3. A changes preferences/notes: cancel confirmation, confirm once, double-click,
+   retry same delivery, refresh/re-login; verify exactly one persisted request,
+   unchanged active preferences, real history and recipient-specific notifications.
+4. B cannot list/read/cancel/respond to A's request or mark A's notifications.
+   Read-only roles cannot submit/cancel/process. Customer cannot submit status,
+   tenant, actor, internal note or final-setting fields via forged requests.
+5. Admin starts, requests info (reason required), A responds; admin private notes
+   invisible in customer JSON and direct authenticated Data API queries.
+6. Manually update/test the isolated ElevenLabs agent. Review final values and
+   explicit confirmation; complete and check active preferences/request/audit/
+   notifications persisted together after refresh/re-login.
+7. Open two requests on the same snapshot; complete one, ensure the older needs
+   explicit review. Simultaneous admins must receive409 for outdated versions.
+8. Reject with reason and cancel a pending request; preserve all history. Mark
+   notifications read/all-read; verify15s refresh and persistence in another session.
+9. Exercise desktop/mobile dialogs, keyboard focus, errors/loading/empty states.
+   Verify previous real-call transcript and appointment workflows still work.
+10. Configure an email provider/scheduler separately only if approved; until then
+    validate in-app notifications and overdue indicators without claiming email.
+
+### Independent verification result
+
+Independent orai-test-runner completed against this feature working tree:
+
+- PASSED: security31/31, webhook5/5, booking8/8 and managed-agent14/14
+  (58 tests total). Managed-agent tests cover local SQL/RLS persistence,
+  authorization, malformed payloads, duplicate/unchanged requests, cancellation,
+  information/rejection transitions, private notes, per-recipient read state,
+  stale request/reviewed-active versions and atomic rollback if notifications fail.
+- PASSED: typecheck, lint (0 errors;9 pre-existing warnings in unrelated voice/
+  widget files), production build and git diff whitespace check. A transient
+  Windows EPERM during a build rerun resolved on retry; final build exit0.
+- PASSED: independent owned production-server HTTP smoke, both localhost and
+  127.0.0.1: /, /beauty, /dashboard, /admin returned200. New authenticated APIs
+  returned401 without login; same-origin request POST401; foreign/missing origin
+  POST403; retired customer agent PATCH405. Own smoke server was stopped.
+- FAILED: no remaining automated check failures.
+- NOT VERIFIED: authenticated interactive browser UI, real hosted persistence and
+  cross-tenant workflow for this new migration, multi-session15s browser refresh,
+  actual manual ElevenLabs configuration changes, email/scheduled delivery.
+  Hosted migration/deployment remains intentionally unperformed and requires
+  approval. Existing webhook/auth/booking regression tests passed; this feature
+  did not re-run a billable live provider conversation.
+
+No secrets or local data/config were staged. Unrelated .codex files preserved.
+No merge, hosted migration, production data change, deployment or added cost.
+
+## PR #5 Bugbot follow-up — 2026-11-25
+
+Scope limited to the two unresolved findings on d4b678e. The branch remains
+`codex/managed-agent-requests`, stacked on PR #4 (`codex/elevenlabs-post-call`).
+
+- Submit RPC now marks replayed results explicitly on both idempotency lookup
+  paths. Replays retain the original row/current status and perform no request,
+  preference, event or notification writes. API returns200 for replay,201 only
+  for a new pending request; private RPC metadata is mapped to a public replay flag.
+- Customer feedback uses the persisted status rather than always claiming a new
+  pending request. Terminal replay keeps the draft, refreshes the active baseline,
+  displays the original request, and rotates the idempotency key. An intentional
+  new request requires another explicit confirmation. Unknown/network failures
+  preserve the original key for safe retry.
+- Empty/whitespace-only admin messages no longer clear the last non-empty
+  customer-visible response. New non-empty responses replace the summary field;
+  every transition and each prior response remain in customer-readable audit events.
+- Regression tests cover all three terminal statuses, side-effect-free retries,
+  fresh-key intentional resubmission, replay HTTP/feedback for all six statuses,
+  and repeated information/start/complete transitions with full response history.
+
+The existing UNAPPLIED managed-agent migration is amended; it has not been applied
+to hosted staging or production. No changes to ElevenLabs ingestion or existing
+hosted staging, RLS grants, automatic deployment settings or PR dependency.
+
+Independent verification PASSED: security31/31, webhook5/5, booking8/8,
+managed-agent17/17 (61 total). Typecheck, lint (0 errors,9 existing unrelated
+warnings), production build and diff check passed. Initial missing PGlite test
+result types were fixed without weakening assertions; final rerun passed. Build
+initially hit Windows EPERM; approved elevated retry passed exit0.
+
+Independent production-server smoke passed on both localhost and127.0.0.1:
+/, /beauty, /dashboard and /admin200; protected GET APIs401; same-origin POST401,
+foreign/missing-origin POST403; retired agent PATCH405. Owned server stopped.
+
+FAILED: no remaining verification failures. NOT VERIFIED: authenticated browser
+interaction and hosted persistence for this unapproved migration. SQL tests use
+local PGlite and API transport is mocked, not proof of real Supabase sessions.
+No hosted migration, deployment, merge or production data change was performed.
+Existing real ElevenLabs staging integration was preserved and not reconfigured.
+
+## PR #5 isolated staging deployment and acceptance — 2026-11-25
+
+User explicitly approved this staging migration/deployment. No new paid resources
+or paid features were created. Existing project resources were reused:
+
+- Supabase: `wnajobvcldveajtdvbwg` (`orai-pr4-staging`).
+- Vercel project: `prj_jFozNUtpm9Ak2b4aDXOoXV3lS2Y0` (`orai-pr4-staging`).
+- Deployment: `dpl_5JMdKR8YL8bHwgFCzUyLhDVsi1dy`, READY, exact source
+  `912bad8e24afd0307a0bb7bf9e9d0f11a08a8111`.
+- Stable staging URL: https://orai-pr4-staging.vercel.app
+- Deployment URL: https://orai-pr4-staging-9trowjhxt-ronho1414.vercel.app
+- Existing webhook remains https://orai-pr4-staging.vercel.app/api/webhooks/elevenlabs
+  with its existing configured protection access and signing secret unchanged.
+
+Vercel calls this dedicated project's default target `production`; that is the
+ISOLATED STAGING PROJECT's stable domain, not the separate Orai production project.
+No request targeted the Orai production project/database. Both PRs remain unmerged.
+No agent mapping, ElevenLabs setting, webhook secret or Deployment Protection
+setting was changed. Feature branch automatic deployments remain disabled.
+
+### Migration and rollback readiness
+
+All seven dependency migrations were present. Source migration
+`20261124160158_managed_agent_requests.sql` was applied successfully. Its SHA256 is
+`b4be2226ef234822ff7b486197a58a7c1078f4328753d6fea19a6b595e0536cd`.
+MCP records it as `20261124164911 / managed_agent_requests` (server-generated
+migration timestamp; do not blindly reapply the local file using CLI db push).
+
+Before applying, a gitignored scoped snapshot captured the nine existing public
+business tables, agent ownership mappings, helper definitions and agents ACL at
+`data/pr5-pre-migration-backup.json`. Counts:2 organizations,3 profiles,2 agents,
+5 conversations,0 appointments. Snapshot is a local scoped backup, NOT a tested
+full PITR restore or Auth backup; no paid backup product was enabled.
+
+Rollback plan: retain additive tables/audit data, restore the prior STAGING app
+`dpl_Bd9tKqLHMa96EFAskbZ4He2szvbt` (cf09b4c), then diagnose/roll forward. Do not
+reset the DB or drop collected requests. Any destructive schema reversal requires
+separate review/approval and export of new data. No rollback was needed/performed.
+
+After migration: all5new tables have RLS; authenticated users cannot INSERT or
+UPDATE them; RPC is executable only by service_role (anon/authenticated denied).
+Authenticated reads cannot access agents.config or provider agent IDs.
+
+### Actual hosted API and database acceptance — PASSED
+
+- Real existing fictional A/B/Super Admin password login; A request persists
+  after logout/re-login and exact stored data agrees with deployed APIs.
+- Submit201, retry200/same ID, unchanged/forged-tenant validation rejected.
+  Active preferences unchanged through submission/information/processing; only
+  completion updates active preferences/version and final applied snapshot.
+- Information request/customer reply/private admin notes/completion flow; missing
+  confirmation rejected, cancelled/rejected/completed replay preserves real status.
+- Per-recipient notifications/unread counts, individual read and all-read persist;
+  B cannot mark A's notification read. Real pending summary counts verified.
+- B receives404 for A detail and cannot cancel/process A requests. Direct
+  authenticated Data API returns zero foreign requests/preferences/events/
+  notifications; customer notes remain hidden; direct mutation RPC denied.
+- Original5conversations retained. The real82s/13turn ElevenLabs conversation
+  `conv_0901m872wz6me4pbqq2ecdwc89nk` remains visible to A and hidden from B.
+- Fictional appointment `b2a6612c-3213-4883-8ec8-e13809337259` created for this
+  acceptance, listed/updated to confirmed and persisted; B cannot read/update it.
+- Webhook route accepts existing automation protection access and rejects an
+  unsigned request401. No new billable provider conversation was initiated.
+
+### Actual browser acceptance — PASSED
+
+Built-in browser/node REPL failed to initialize (kernel assets path missing).
+Temporary Playwright1.65.1 + installed Edge headless successfully verified the
+real deployed UI instead. No dependency/package-lock/product code was changed;
+protection header was scoped only to the staging origin and not printed.
+
+- Separate A/B/admin browser sessions, real login and dashboard navigation.
+- Customer confirmation back/cancel, real form submission, cancellation and
+  request history after browser reload.
+- Admin list/sidebar pending badge and notification bell/unread/read-all actions.
+  Background polling observed at15,002ms without a full reload.
+- Full browser sequence on REQ-000005: admin starts, requests information,
+  customer replies, admin resumes, reviews completion modal, checks confirmation
+  and completes; customer final values auto-refresh and persist after reload.
+- Completion button disabled before confirmation. Desktop and390px mobile render
+  checked, mobile has no horizontal overflow; screenshots stored locally ignored.
+
+Completion confirmation in these fictional staging fixtures is a QA INPUT ONLY.
+It verifies the Orai workflow and transaction; it is NOT evidence that someone
+actually updated or tested the ElevenLabs provider. Agent rows/provider config
+remain exactly equal to the pre-migration snapshot. Actual provider updates are
+outside this acceptance and were not performed.
+
+Final stored requests: REQ-000001 completed; REQ-000002 cancelled;
+REQ-000003 rejected; REQ-000004 cancelled; REQ-000005 completed. Active version2
+matches the latest completed final preferences. All request history is retained.
+
+### Independent gate and limitations
+
+Independent orai-test-runner separately verified hosted Auth/API/DB consistency,
+A/B API and RLS isolation, private note confidentiality, service-only RPC grants,
+persistent notification state, unchanged agent/provider config and old real call,
+and confirmed appointment ownership/status. Its test sessions were logged out.
+
+PASSED: hosted acceptance above. FAILED: no remaining product failures. A test
+harness initially used global logout and another typed into a form before the
+prior action settled; corrected harness sequencing/local logout passed on resume.
+Product code was not changed to pass these tests.
+
+The61local regression tests/typecheck/lint/build already passed for912bad8 and
+were not unnecessarily repeated during this unchanged-code rollout. Vercel build
+for912bad8 also completed successfully. Independent hosted verification is new.
+
+NOT VERIFIED: actual ElevenLabs manual configuration/update/test, paid-provider
+email delivery, scheduled overdue notification delivery, full backup restoration,
+and real-device/Safari/Firefox visual behavior. Email remains unconfigured and
+scheduled overdue reminders remain a documented future configuration step.
+No production data changes, merge or production deployment were performed.
+
+### Exact manual browser acceptance steps
+
+1. Open https://orai-pr4-staging.vercel.app/dashboard . If Vercel Authentication
+   appears, sign in with the existing authorized Vercel account. Do not disable
+   Deployment Protection or paste bypass secrets into URLs/screenshots.
+2. Use the existing password for `orai-staging-a@example.test`. Open 我的 AI 專員.
+   Check active values, select a different preference and add a clearly fictional
+   note. Submit → 返回修改 should save nothing; submit → 確認提交 creates one row.
+3. In a separate browser profile open https://orai-pr4-staging.vercel.app/admin
+   using `orai-staging-admin@example.test` and its existing password. Open 調整要求.
+   Without reload, wait up to20seconds for the new pending row/badge/bell count.
+4. Open the row, compare current/requested settings, 開始處理, add a private note,
+   enter a customer-visible reason and 要求補充資料. In A, open the notification or
+   request, fill 補充資料給 Orai and send. Confirm private notes never appear there.
+5. Admin starts again. Blank transition must preserve the previous Orai reply.
+   Before a REAL service change is marked complete, manually update/test the
+   isolated ElevenLabs agent yourself; only then confirm the manual-update box.
+   This rollout's existing completed QA rows do not prove that provider step.
+   Review final settings and 完成並套用; A should update without reload and retain
+   the completed request, response, timestamp and final preferences after login.
+6. Submit a separate fictional request and 取消此要求 while pending; refresh and
+   confirm history remains cancelled. Test another with admin rejection/reason.
+7. Open the bell: mark one/all read, refresh/re-login and verify read state persists.
+8. In another profile use `orai-staging-b@example.test` and its existing password.
+   A's request rows, notification references and conversations must not appear.
+9. In A open 通話紀錄 for the original real call, then 預約管理 to see the confirmed
+   FICTIONAL PR5 QA appointment. Repeat at mobile width; no real customer data.
+
+Passwords/bypass/signing secrets are not included here. All backup, credentials,
+test scripts, browser artifacts and result JSON remain gitignored under data/.
+
+## PR #5 stale-version recovery — 2026-11-25
+
+Bugbot issue: terminal replay retained the draft but a failed one-shot refresh or
+later admin completion left its base_version stale, with no safe in-app recovery.
+Fix commit: `7eb458833019cc33ced1ec276e0ed18b0ecc7206`.
+
+- Customer draft now owns distinct baseline/latest snapshots. Background polling
+  preserves unsaved preferences and notes, flags changed versions and closes an
+  outdated confirmation instead of silently rebasing/submitting.
+- Typed HTTP409 errors trigger an in-app review panel. Failed refresh keeps the
+  draft and blocks confirmation until a successful fresh fetch. Subsequent polls
+  or the retry button can recover without navigating/reloading.
+- Review shows the latest active values and a highlighted submission preview.
+  Explicit review carries only customer-edited fields onto the latest snapshot;
+  untouched fields adopt current active values. Overlapping edits stay visible.
+  Review checks the exact rendered version; another update requires re-review.
+- Terminal replay always enters this review flow. Confirmation allocates a fresh
+  idempotency key after review; unknown/network errors preserve the exact original
+  key/payload. No automatic re-POST or active setting update is performed.
+- Refresh epochs reject requests started before terminal/conflict/acceptance,
+  including old failures; lower-version responses cannot undo a newer snapshot.
+- SQL/RLS/idempotency validation remain unchanged. No new migration is needed.
+
+Independent verification PASSED: security31, webhook5, booking8, managed-agent23
+(67 tests total), typecheck, lint (0 errors/9 existing warnings), production build
+and local HTTP smoke. Six new regressions cover concurrent completions, failed
+refresh after terminal replay,409 recovery with another update, frozen retry
+payload/key, typed409 errors, and late pre-terminal refreshes. Initial epoch test
+fixture errors and an owned temporary helper lint failure were corrected without
+weakening assertions/rules.
+
+Staging regression PASSED on deployment
+`dpl_CodSb5bV11hQegyRodVbeqYPUuQk` (READY), exact7eb4588 source, existing
+isolated project/domain https://orai-pr4-staging.vercel.app/dashboard . Previous
+working deployment dpl_5JMdKR8YL8bHwgFCzUyLhDVsi1dy remains the rollback target.
+No new migration, paid resource or protection/secret setting was changed.
+
+Real deployed Edge headless test used fictional A/admin accounts and selectively
+injected transport failures (not fake persistence). It actually created/cancelled
+REQ-000007, replayed the same payload/key against its real terminal row, then
+blocked the refresh. The UI retained greeting/notes and blocked review until a
+fresh fetch succeeded. A real concurrent admin completion of REQ-000008 advanced
+active version2→3 while the customer held an older confirmation. The next real
+POST returned409; the UI preserved the draft, fetched current settings, displayed
+the comparison and required explicit review and another confirmation. REQ-000009
+then persisted with base_version3, a new idempotency key, the customer's greeting/
+notes and the newer untouched speaking-speed value. It was cancelled after the
+check to avoid leaving an open QA request. No full page reload was used.
+
+A final hosted SQL read confirmed these states/versions and active version3.
+Agent/provider configuration still exactly equals the pre-migration snapshot.
+The concurrent-completion confirmation was clearly marked fictional QA only;
+no actual ElevenLabs update/provider test was claimed or performed.
+
+PASSED: independent67test/type/lint/build/HTTP gate;3deployed browser regression
+scenarios and actual persisted rows. FAILED: no unresolved failures. NOT VERIFIED:
+real provider manual updates, email/scheduler delivery and full backup restoration
+remain outside scope. Earlier staging tests already verified tenant RLS, original
+conversations and appointment management; unchanged infrastructure was not audited
+again. Both PRs remain unmerged, production untouched.
+
+Customer recovery: select「重新取得最新設定」if refresh failed, inspect「最新生效設定」
+and「保留修改後的提交預覽」, select「已覆核，保留我的修改」, then「提交調整要求」and
+「確認提交」. If an administrator updates again, repeat review; never reload to
+recover a draft. Unknown submission/transport errors keep the original retry key.
+
+## Dashboard preference simplification — 2026-11-25
+
+User removed voice character, speaking speed, response detail and preferred reply
+language from both dashboards. Shared edit forms, read-only snapshots/current/
+requested/final comparisons, conflict review and request summary/counts now show
+only voice gender, response style and greeting (plus the existing request notes).
+Changed selections, greetings and comparison values use green text/light green
+backgrounds; unchanged values retain their normal style.
+
+Historical JSON/schema are preserved; no migration is needed. When completing
+old requests, hidden legacy values are carried from the latest active snapshot
+instead of silently applying invisible historical requested values. Existing
+optimistic-version checks still protect the completion transaction.
+
+Independent verification: managed-agent23/23, typecheck and temporary SSR checks
+passed. SSR confirms exactly3kept fields, no4retired labels/controls, green changed
+values and normal unchanged values; hidden active values survive historical
+request completion projection. Final lint/build/staging results recorded below.
+
+Independent final result: managed-agent23/23, typecheck/lint/build and local HTTP
+checks passed (lint0errors/9pre-existing warnings). Unrelated security/webhook/
+booking suites were not repeated for this UI-only change. Staging code revision:
+89f393c; deployment dpl_Bp9eQxTLpWyBkgKv7rYqc78tTutZ READY at
+https://orai-pr4-staging.vercel.app . Real Edge headless acceptance passed on
+customer and admin: retired fields absent,3retained fields rendered, changed
+selection/comparison values green. Desktop screenshot visually inspected.
+No product data was submitted during this browser check; test sessions logged out.
+FAILED: none. NOT VERIFIED: physical mobile-device visual behavior in this pass.
+No migration, provider configuration, production deployment or PR merge.
+
+## Duplicate-open-request409 routing and staging admin login — 2026-11-25
+
+Code fix560b6d8 distinguishes public structured error codes:
+DUPLICATE_OPEN_REQUEST, STALE_ACTIVE_PREFERENCES, STALE_REQUEST_VERSION,
+IDEMPOTENCY_KEY_REUSED and REQUEST_CONFLICT. Existing RPC exception text is mapped
+at the server boundary; raw database details never reach clients. No new SQL
+migration is required. Duplicate lookup is bound to the verified session tenant
+and exact normalized payload/open statuses; only id/reference are returned.
+
+Duplicates retain the draft and frozen attempt/key, show an existing-request
+button and block identical resubmission. They do not initiate stale-version
+review or automatically repost. Different edited intent can use a new key.
+Viewing a matching terminal request releases the duplicate block. A missing-ID
+race can match the authorized history row by normalized payload/notes; resolving
+an older duplicate never clears a newer attempt's retry key. Only the structured
+stale-active code enters the existing review/fetch/reconfirm workflow.
+
+Independent gate PASSED: security31/webhook5/booking8/managed27 (71tests),
+typecheck/lint/build and loopback HTTP smoke. Lint0errors/9existingwarnings.
+Focused tests cover distinctcodes, tenant-bound lookup, retained attempts/drafts,
+blocked duplicate loops, terminal fallback and newer-attempt preservation.
+Independent extra mocked B-tenant lookup and sanitized503failure checks passed.
+Simplified3field UI and green highlights are preserved.
+
+Separate login issue: user had changed ADMIN_PASSWORD in local.env, which does
+not update hosted Supabase Auth. The example.test email cannot receive recovery
+mail. After explicit user approval, the chosen local ADMIN_PASSWORD was applied
+only to orai-staging-admin@example.test in wnajobvcldveajtdvbwg. Actual Supabase
+password login, deployed app login and Super Admin API access passed200. Test
+session logged out; credentials were not displayed, copied into account fixtures
+or committed. No production password/data/config change was made.
+
+Staging READY: code560b6d8c322ef1167f840e2b2e4baa07ca3db2ec,
+deployment dpl_AH9BpVsS1t9SYe3FwS8zK3bfCSRY, existing project/domain
+https://orai-pr4-staging.vercel.app . No new resources or migrations.
+
+Real Edge browser acceptance PASSED:
+- An identical open request returned409/DUPLICATE_OPEN_REQUEST and its own
+  reference; the in-app link opened the real detail. Draft/notes survived and
+  no stale-review panel or automatic repeat POST appeared across a15second poll.
+- Merchant B could not access A's request and an identical B request's duplicate
+  response pointed only to B's own ID.
+- Cancelling the existing request released the duplicate block, preserving the
+  draft; explicit resubmission used a new key and created one intentional row.
+- A separate real server version-conflict409 returned STALE_ACTIVE_PREFERENCES;
+  the existing fetch/review/reconfirm path recovered successfully. The harness
+  injected a mismatching wire base_version to exercise this without provider or
+  active-setting mutations. The three-field UI/green greeting remained intact.
+
+Final SQL confirmed REQ-000011(original duplicate), REQ-000013(intentional new)
+and REQ-000014(stale recovery) all cancelled after QA; active version remained3.
+The initial test harness omitted the protection header for PATCH; corrected
+origin-scoped header handling and resumed the same request instead of recreating
+passed fixtures. This was a test transport issue, not an app login failure.
+
+FAILED: no unresolved product failures. NOT VERIFIED: physical-device rendering,
+actual ElevenLabs updates, email/scheduled delivery and full backup restore remain
+outside this focused fix. No production merge/deployment/config/data changes.
+Ignored test scripts/results and local passwords were not committed.
+
+## Duplicate lock background reconciliation (PR #5 Bugbot) — 2026-11-25
+
+Code fix commit: `dcf4bbf` on `codex/managed-agent-requests` (plus handover docs `GEMINI.md` and this update).
+No SQL/RLS migration, production deployment, or merge was performed.
+
+### Implemented
+- `lib/platform/agent-preferences.ts` & `lib/platform/agent-preference-draft.ts`: added shared `isTerminalRequestStatus()`, `duplicateEpoch` tracking, `duplicate_matched` event, epoch/ID-guarded `duplicate_resolved`, and pure `reconcileDuplicateLock()` coordinator.
+- `lib/platform/managed-agent-service.ts` & `app/api/platform/customer/change-requests/lookup/route.ts`: extracted shared `findLatestMatchingRequest()` query helper and added tenant-isolated `POST /api/platform/customer/change-requests/lookup` (using `requireCustomerAuth`, `requestSupabase` RLS, `withPlatformRequest` same-origin validation, and `Cache-Control: no-store`) for rare missing-ID 409 races.
+- `components/managed-agent/CustomerAgentPanel.tsx`: reconciles active duplicate locks on 15s polling, `MANAGED_REFRESH_EVENT`, manual refresh, pagination, `patchRequest`, and 409/detail loads even when the matching request's detail panel is unselected or absent from the current paginated history page. Added sequence/epoch guards for `loadHistory`, `loadDetail`, and background reconciliation (using separate blocking-load sequence counters `historyBlockingSeqRef`/`detailBlockingSeqRef` and in-flight counts so quiet/soft polls and out-of-order user fetches never freeze `historyLoading`/`detailLoading` spinners) so delayed polling responses never unlock a newer duplicate or discard a newer attempt's retry key, while preserving unsaved drafts and stale-version recovery (`completed` refreshes active preferences).
+- `tests/managed-agent-draft.test.ts` & `tests/managed-agent-api.test.ts`: added regression tests covering all three terminal statuses (`cancelled`, `rejected`, `completed`), unselected/off-page requests, paginated history absence not falsely unlocking open/errored/missing-ID requests, delayed polling responses, retry-key preservation, stale-version recovery, and `/lookup` auth/CSRF/validation/tenant isolation/503 responses.
+- `GEMINI.md`: added concise AI handover guide referencing `AGENTS.md` and `docs/PROJECT_STATUS.md`.
+
+### Independent verification & staging check
+- Independent `orai-test-runner` on `dcf4bbf`: PASSED `test:security` 31/31, `test:webhooks` 5/5, `test:booking` 8/8, `test:managed-agent` 31/31 (75/75 total), `typecheck` (0 errors), `lint` (0 errors; 9 pre-existing warnings in unrelated voice/widget files), `next build` (29/29 routes generated; `/api/platform/customer/change-requests/lookup` built as dynamic route), `git diff --check`, and loopback HTTP smoke on port 3012 (`/`, `/beauty`, `/dashboard`, `/admin` 200; protected GET & same-origin lookup POST 401; missing/null/mismatched/foreign Origin POST lookup 403; GET lookup / customer agent PATCH 405; smoke server stopped cleanly).
+- Current staging revision check: `GET https://orai-pr4-staging.vercel.app/api/platform/customer/change-requests/lookup` with existing staging protection bypass returned `404` on 2026-11-25, confirming isolated staging remains on `560b6d8` (`dpl_AH9BpVsS1t9SYe3FwS8zK3bfCSRY`).
+- Remaining blockers / not verified:
+  - Deploying latest PR #5 code to `orai-pr4-staging` via Vercel MCP returned `403` pending user team consent (`authorize_team_access` for `team_H2vtvdKF37SmVwMwHBWn0s08`).
+  - Final `orai-test-runner` rerun on the `dcf4bbf` + `GEMINI.md` + `PROJECT_STATUS.md` working tree: PASSED all 75/75 tests, `typecheck`, `lint`, `next build` (29/29 routes), `git diff --check`, and port 3012 HTTP smoke.
+  - Live staging browser execution of `CustomerAgentPanel.tsx` background polling and hosted Supabase PostgREST JSONB matching for `/lookup` against `wnajobvcldveajtdvbwg` remain **NOT VERIFIED** until approved staging deployment.
+  - Cursor Bugbot check-run on `dcf4bbf`/final commit, email/scheduled reminders, manual ElevenLabs provider updates, PITR restore, physical mobile rendering, and branch integration of PR #4/#5 onto `origin/main` (`bb7b371`) remain pending.
