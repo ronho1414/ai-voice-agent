@@ -1,5 +1,17 @@
 # Orai Service — Project Status & Security Review
 
+## Domain Integration PR — 2026-11-25 (unreleased)
+
+- Dedicated `codex/domain-integration` branch is based directly on `main` `a258a51`, without the unmerged PR #4/#5 features, migrations, dependencies or credentials. The original feature checkout and its uncommitted work remain intact.
+- Shared validated public origin; official homepage canonical/Open Graph; same-host legacy aliases; robots/sitemap with explicit official-site indexing opt-in; private/demo noindex; configured-origin new embed snippets. Existing embeds retain their script origin and strict CSRF stays unchanged.
+- Contact email already uses `info@oraiservice.com`; receipt has not been tested.
+- Branch-specific Vercel Git deployment is disabled in `vercel.json` before pushing this PR. No hosted settings, Staging settings, webhooks, credentials, migrations or deployments are changed.
+- Independent gate for this main-based branch **passed**: domain 5 + security 27 + booking 8 = **40/40**, typecheck, lint (0 errors / 9 existing warnings), both default-safe and explicit-official-indexing production builds, and `git diff --check`; all exited 0. Sandbox build EPERM was resolved by rerunning the same local build with approved permissions.
+- Local HTTP passed on 11 routes: homepage, admin/customer/demo pages, three aliases, robots/sitemap and both embed/widget scripts. Safe default blocks indexing with an empty sitemap; explicit official indexing emits the homepage sitemap/canonical/OG while private/demo pages remain noindex. New/old Host and loopback same-origin checks passed (invalid same-origin input 400, foreign/missing Origin 403); embed OPTIONS returned 204.
+- Headless Edge passed same-host legacy alias navigation and private/demo noindex with external provider traffic blocked. Both local preview processes were stopped. Failed/unresolved product checks: none.
+- Earlier stacked feature checkout separately passed 76 tests plus build/type/HTTP/Edge. Webhook/managed-agent suites do not exist on this main base and were not imported or claimed as rerun. Hosted Auth, database persistence, email delivery, real ElevenLabs calls and post-deployment acceptance remain **not verified**. No environment files were copied into this worktree.
+- Release/configuration/rollback details: [DOMAIN_INTEGRATION.md](./DOMAIN_INTEGRATION.md). Production release and settings require separate approval. Hosted Auth/data persistence, email delivery and real ElevenLabs calls are not verified by these local tests.
+
 **Date:** 2026-11-24  
 **Branch:** `review/supabase-auth-audit`  
 **Target:** `main`  
