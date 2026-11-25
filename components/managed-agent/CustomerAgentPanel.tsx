@@ -71,7 +71,11 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
   const confirmTitleId = useId();
   const submitLock = useRef(false);
   const historySeqRef = useRef(0);
+  const historyBlockingSeqRef = useRef(0);
+  const historyBlockingCountRef = useRef(0);
   const detailSeqRef = useRef(0);
+  const detailBlockingSeqRef = useRef(0);
+  const detailBlockingCountRef = useRef(0);
   const activeDetailIdRef = useRef<string | null>(null);
   const [form, setForm] = useState(initialPreferenceDraft);
   const formRef = useRef(form);
@@ -170,8 +174,14 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
   }, [applyDuplicateEvent, fetchRequestDetail, loadAgent, lookupDuplicateStatus]);
 
   const loadHistory = useCallback(async (nextPage: number, opts?: { quiet?: boolean }): Promise<ChangeRequest[] | null> => {
+    const quiet = opts?.quiet === true;
+    if (quiet && historyBlockingCountRef.current > 0) return null;
     const seq = ++historySeqRef.current;
-    if (!opts?.quiet) setHistoryLoading(true);
+    const blockingSeq = quiet ? 0 : ++historyBlockingSeqRef.current;
+    if (!quiet) {
+      historyBlockingCountRef.current += 1;
+      setHistoryLoading(true);
+    }
     try {
       const body = await apiJson<ListResponse>(`/api/platform/customer/change-requests?page=${nextPage}`);
       if (seq !== historySeqRef.current) return null;
@@ -187,15 +197,21 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
       }
       return null;
     } finally {
-      if (!opts?.quiet && seq === historySeqRef.current) setHistoryLoading(false);
+      if (!quiet) {
+        historyBlockingCountRef.current = Math.max(0, historyBlockingCountRef.current - 1);
+        if (blockingSeq === historyBlockingSeqRef.current) setHistoryLoading(false);
+      }
     }
   }, []);
 
   const loadDetail = useCallback(async (id: string, opts?: { soft?: boolean }): Promise<ChangeRequest | null> => {
     const soft = opts?.soft === true;
+    if (soft && detailBlockingCountRef.current > 0) return null;
     const detailSeq = ++detailSeqRef.current;
+    const blockingSeq = soft ? 0 : ++detailBlockingSeqRef.current;
     const duplicateEpoch = formRef.current.duplicateEpoch;
     if (!soft) {
+      detailBlockingCountRef.current += 1;
       activeDetailIdRef.current = id;
       setSelectedId(id);
       setDetailLoading(true);
@@ -228,7 +244,10 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
       }
       return null;
     } finally {
-      if (!soft && detailSeq === detailSeqRef.current) setDetailLoading(false);
+      if (!soft) {
+        detailBlockingCountRef.current = Math.max(0, detailBlockingCountRef.current - 1);
+        if (blockingSeq === detailBlockingSeqRef.current) setDetailLoading(false);
+      }
     }
   }, [applyDuplicateEvent, fetchRequestDetail, loadAgent, reconcileDuplicate]);
 
@@ -633,6 +652,8 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
               onClick={() => {
                 activeDetailIdRef.current = null;
                 detailSeqRef.current += 1;
+                detailBlockingSeqRef.current += 1;
+                setDetailLoading(false);
                 setSelectedId(null);
                 setDetail(null);
                 setEvents([]);
