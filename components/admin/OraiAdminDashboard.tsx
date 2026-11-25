@@ -2,6 +2,12 @@
 
 import { useEffect, useState, useCallback, type FormEvent } from "react";
 import type { Organization, SuperAdminOverview } from "@/lib/platform/types";
+import {
+  AdminChangeRequestsPanel,
+  NotificationBell,
+  MANAGED_REFRESH_EVENT,
+  type AdminRequestCounts,
+} from "@/components/managed-agent";
 
 type OrgWithAgent = Organization & {
   agent: {
@@ -38,7 +44,7 @@ export function OraiAdminDashboard() {
   const [authenticated, setAuthenticated] = useState(false);
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
-  const [tab, setTab] = useState<"overview" | "customers" | "agents" | "usage" | "system">("overview");
+  const [tab, setTab] = useState<"overview" | "customers" | "agents" | "usage" | "system" | "requests">("overview");
   const [overview, setOverview] = useState<SuperAdminOverview | null>(null);
   const [organizations, setOrganizations] = useState<OrgWithAgent[]>([]);
   const [usageList, setUsageList] = useState<UsageSummaryRow[]>([]);
@@ -46,6 +52,21 @@ export function OraiAdminDashboard() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+  const [pendingRequestCount, setPendingRequestCount] = useState<number | null>(null);
+  const [focusRequestId, setFocusRequestId] = useState<string | null>(null);
+
+  const openManagedRequest = useCallback((requestId: string) => {
+    setFocusRequestId(requestId);
+    setTab("requests");
+  }, []);
+
+  const handleRequestCounts = useCallback((counts: AdminRequestCounts) => {
+    setPendingRequestCount(typeof counts.pending === "number" ? counts.pending : 0);
+  }, []);
+
+  const clearFocusRequest = useCallback(() => {
+    setFocusRequestId(null);
+  }, []);
 
   // Create Business Form State
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -109,6 +130,40 @@ export function OraiAdminDashboard() {
       void loadData();
     }
   }, [authenticated, tab, loadData]);
+
+  useEffect(() => {
+    if (!authenticated) return;
+
+    let cancelled = false;
+
+    async function loadPendingCount() {
+      try {
+        const res = await fetch("/api/platform/admin/change-requests?page=1", { cache: "no-store" });
+        if (!res.ok) return;
+        const body = await res.json();
+        const pending = body?.counts?.pending;
+        if (!cancelled && typeof pending === "number") {
+          setPendingRequestCount(pending);
+        }
+      } catch {
+        // Keep last known real count; never invent a badge value.
+      }
+    }
+
+    void loadPendingCount();
+    const timer = window.setInterval(() => {
+      void loadPendingCount();
+    }, 15_000);
+    const onRefresh = () => {
+      void loadPendingCount();
+    };
+    window.addEventListener(MANAGED_REFRESH_EVENT, onRefresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener(MANAGED_REFRESH_EVENT, onRefresh);
+    };
+  }, [authenticated]);
 
   async function handleLogin(e: FormEvent) {
     e.preventDefault();
@@ -337,6 +392,26 @@ export function OraiAdminDashboard() {
 
           <button
             type="button"
+            onClick={() => setTab("requests")}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
+              tab === "requests" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
+            }`}
+          >
+            <span className="flex-1">調整要求</span>
+            {pendingRequestCount !== null && pendingRequestCount > 0 && (
+              <span
+                aria-label={`待處理 ${pendingRequestCount} 項`}
+                className={`min-w-[1.25rem] rounded-full px-1.5 py-0.5 text-center text-[10px] font-extrabold ${
+                  tab === "requests" ? "bg-white text-[#09090B]" : "bg-[#09090B] text-white"
+                }`}
+              >
+                {pendingRequestCount > 99 ? "99+" : pendingRequestCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setTab("usage")}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
               tab === "usage" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
@@ -377,6 +452,10 @@ export function OraiAdminDashboard() {
 
       {/* Main Content Area */}
       <main className="flex-1 p-6 sm:p-10 max-w-6xl">
+        <div className="mb-7 flex items-center justify-between gap-4">
+          <div className="font-bold text-base">Orai 總管理員後台</div>
+          <NotificationBell onOpenRequest={openManagedRequest} />
+        </div>
         {error && (
           <div className="mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
             {error}
@@ -386,6 +465,14 @@ export function OraiAdminDashboard() {
           <div className="mb-6 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold">
             {successMsg}
           </div>
+        )}
+
+        {tab === "requests" && (
+          <AdminChangeRequestsPanel
+            initialRequestId={focusRequestId}
+            onRequestHandled={clearFocusRequest}
+            onCountsChange={handleRequestCounts}
+          />
         )}
 
         {/* 1. OVERVIEW TAB */}

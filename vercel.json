@@ -2,7 +2,10 @@
   "regions": ["hkg1"],
   "git": {
     "deploymentEnabled": {
-      "codex/domain-integration": false
+      "codex/domain-integration": false,
+      "codex/elevenlabs-post-call": false,
+      "codex/managed-agent-requests": false,
+      "integrate/pr4-pr5-main": false
     }
   }
 }

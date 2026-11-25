@@ -33,6 +33,8 @@ before(async () => {
     "20261123105304_auth_tenant_isolation.sql",
     "20261123110214_beauty_appointment_requests.sql",
     "20261123233500_update_appointment_transition.sql",
+    "20261124055712_elevenlabs_post_call.sql",
+    "20261124103151_immutable_agent_ownership.sql",
   ]) {
     const sql = await readFile(new URL(`../supabase/migrations/${file}`, import.meta.url), "utf8");
     // PGlite has gen_random_uuid built in; the pgcrypto extension is not needed.
@@ -146,4 +148,58 @@ test("revoked, expired, banned or anonymous Auth sessions cannot access data", a
 test("same-tenant foreign keys prevent cross-tenant appointment links even for service role", async () => {
   const { rows } = await db.query<{ id: string }>(`select id from public.conversations where organization_id='${orgB}'`);
   await assert.rejects(db.query(`update public.appointments set conversation_id=$1 where organization_id=$2`, [rows[0].id, orgA]), /appointments_conversation_tenant_fk/);
+});
+
+test('webhook ingestion maps tenants, deduplicates and keeps RLS', async () => {
+  await db.exec(`insert into auth.sessions(id,user_id) values ('${sessionId}','${userA}')`);
+  await db.exec(`insert into public.agents(organization_id,elevenlabs_agent_id) values ('${orgA}','agent_test_a'),('${orgB}','agent_test_b')`);
+  const call = {provider_agent_id:'agent_test_a',provider_conversation_id:'conv_test',channel:'web',duration_seconds:30,started_at:'2026-11-24T00:00:00Z',ended_at:'2026-11-24T00:00:30Z',transcript:[{role:'user',message:'fictional'}],summary:'test',analysis:{},organization_id:orgB};
+  const ingest = (payload:unknown) => db.query<{result:string}>('select public.ingest_elevenlabs_call($1::jsonb) as result',[JSON.stringify(payload)]);
+  await db.exec('set role service_role');
+  assert.equal((await ingest({...call,provider_agent_id:'unknown'})).rows[0].result,'unknown_agent');
+  await Promise.all([ingest(call),ingest(call)]);
+  await db.exec('reset role');
+  assert.equal((await asUser(userA,"select id from public.conversations where provider_conversation_id='conv_test'")).rows.length,1);
+  await assert.rejects(asUser(userB,"update public.conversations set summary='forged' where provider_conversation_id='conv_test' returning id"), /permission denied/);
+  assert.equal((await db.query("select id from public.conversations where provider_conversation_id='conv_test'")).rows.length,1);
+  assert.equal((await asUser(userB,"select id from public.conversations where provider_conversation_id='conv_test'")).rows.length,0);
+  assert.equal((await ingest({...call,provider_agent_id:'agent_test_b'})).rows[0].result,'ownership_conflict');
+  assert.equal((await db.query<{organization_id:string}>("select organization_id from public.conversations where provider_conversation_id='conv_test'")).rows[0].organization_id,orgA);
+  await assert.rejects(asUser(userB,`select public.ingest_elevenlabs_call('${JSON.stringify(call)}'::jsonb)`),/permission denied/);
+  await assert.rejects(db.exec(`insert into public.agents(organization_id,elevenlabs_agent_id) values ('${orgB}','agent_test_a')`),/unique|cannot be reassigned/);
+});
+
+test('organization and agent provisioning rolls back all partial writes on failures', async () => {
+  const orgId='20000000-0000-4000-8000-000000000099';
+  const org={id:orgId,name:'Fictional new salon',slug:'new-salon',industry:'beauty_salon',status:'active',opening_hours:{},created_at:'2026-11-24T00:00:00Z',updated_at:'2026-11-24T00:00:00Z'};
+  const agent={id:'40000000-0000-4000-8000-000000000099',organization_id:orgId,elevenlabs_agent_id:'agent_test_a',name:'Test',voice_name:'Test',language_mode:'trilingual',status:'active',config:{},created_at:org.created_at,updated_at:org.updated_at};
+  const provision=(o:unknown,a:unknown)=>db.query('select public.create_organization_with_agent($1::jsonb,$2::jsonb)',[JSON.stringify(o),JSON.stringify(a)]);
+  await db.exec('set role service_role');
+  try {
+    await assert.rejects(provision(org,agent),/unique|cannot be reassigned/);
+    assert.equal((await db.query('select id from public.organizations where id=$1',[orgId])).rows.length,0);
+    await assert.rejects(provision(org,{...agent,elevenlabs_agent_id:'unique_new',language_mode:'invalid'}),/check constraint/);
+    assert.equal((await db.query('select id from public.organizations where id=$1',[orgId])).rows.length,0);
+    await provision(org,{...agent,elevenlabs_agent_id:'unique_new'});
+    await assert.rejects(provision({...org,id:'20000000-0000-4000-8000-000000000098'},{...agent,id:'40000000-0000-4000-8000-000000000098',organization_id:'20000000-0000-4000-8000-000000000098',elevenlabs_agent_id:'another_new'}),/unique|cannot be reassigned/);
+    assert.equal((await db.query("select id from public.agents where elevenlabs_agent_id='another_new'")).rows.length,0);
+  } finally { await db.exec('reset role'); }
+  for(const role of ['anon','authenticated']) {
+    await assert.rejects(asUser(userA,`select public.create_organization_with_agent('${JSON.stringify(org)}','${JSON.stringify(agent)}')`,role),/permission denied/);
+    await assert.rejects(asUser(userA,`select public.ingest_elevenlabs_call('{}')`,role),/permission denied/);
+  }
+});
+
+test('provider agent ownership survives clearing, deletion and tenant reassignment attempts', async () => {
+  await db.exec('set role service_role');
+  try {
+    await assert.rejects(db.exec(`update public.agents set organization_id='${orgB}' where elevenlabs_agent_id='agent_test_a'`),/cannot be reassigned/);
+    await db.exec(`update public.agents set elevenlabs_agent_id='' where elevenlabs_agent_id='agent_test_a'`);
+    await assert.rejects(db.exec(`insert into public.agents(organization_id,elevenlabs_agent_id) values('${orgB}','agent_test_a')`),/cannot be reassigned/);
+    await db.exec(`insert into public.agents(organization_id,elevenlabs_agent_id) values('${orgA}','agent_test_a')`);
+    await db.exec(`delete from public.agents where elevenlabs_agent_id='agent_test_a'`);
+    await assert.rejects(db.exec(`insert into public.agents(organization_id,elevenlabs_agent_id) values('${orgB}','agent_test_a')`),/cannot be reassigned/);
+    await assert.rejects(db.exec(`delete from public.elevenlabs_agent_ownership`),/permission denied/);
+  } finally { await db.exec('reset role'); }
+  await assert.rejects(asUser(userA,'select * from public.elevenlabs_agent_ownership'),/permission denied/);
 });
