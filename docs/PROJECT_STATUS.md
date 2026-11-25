@@ -1228,3 +1228,38 @@ No SQL/RLS migration, production deployment, or merge was performed.
 - Production database migrations (`20261124055712_elevenlabs_post_call.sql`, `20261124103151_immutable_agent_ownership.sql`, `20261124160158_managed_agent_requests.sql`), Production Supabase Auth / `super_admin` provisioning, and Production Vercel environment alignment (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` / `ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ELEVENLABS_WEBHOOK_SECRET`, and `NEXT_PUBLIC_SITE_URL` / `NEXT_PUBLIC_SITE_INDEXING=true`) remain unapplied and gated on explicit Production approval.
 - Pre-existing `/api/client-config` missing-row `500` handling in `lib/admin/store.ts` (when `embed_clients` has no row under `NODE_ENV=production`) should be reviewed before relying on public embed snippets against a fresh Supabase DB.
 - Phase 2 features (email delivery, scheduled overdue notifications, ElevenLabs PII redaction/retention/deletion automation, physical mobile device testing) remain outside scope.
+
+## Official ElevenLabs homepage widget restoration (`integrate/pr4-pr5-main`) — 2026-11-25
+
+- Restored the official ElevenLabs embed on the Orai homepage while preserving existing custom widget infrastructure (`orai-widget.js`, `app/orai-widget.js/route.ts`, `public/embed.js`, `/api/client-config`).
+- ElevenLabs agent configuration, Supabase databases, and the Production website (`ai-voice-agent` / `oraiservice.com`) were not modified.
+
+### Implemented
+- `components/voicepilot/MarketingVoiceEmbed.tsx`:
+  - Replaced legacy `/orai-widget.js` loading on `/` with `<elevenlabs-convai agent-id="agent_8201m7sbetj3e36s1a2nv3fgcqna" override-language="zh" />` and dynamic client loading of `https://unpkg.com/@elevenlabs/convai-widget-embed` (`async`, `type="text/javascript"`).
+  - Added React 19 `React.JSX.IntrinsicElements` TypeScript declaration for `<elevenlabs-convai>`, homepage-only route guard (`shouldRenderOfficialWidget(pathname)` for `pathname === "/"` only), and duplicate-widget / duplicate-script guards (`hasCompetingWidget`, `ensureOfficialWidgetScript` checking existing `<script>` and `customElements.get("elevenlabs-convai")`).
+  - Compatibility finding: `agent_8201m7sbetj3e36s1a2nv3fgcqna` reports default widget language `"yue"`, while `@elevenlabs/convai-widget-embed@0.28.0` lacks a `"yue"` dictionary entry and throws `TypeError: Cannot read properties of undefined (reading 'languageCode')` without rendering if `override-language` is omitted. Setting `override-language="zh"` (official attribute) selects the agent's configured `"zh"` preset cleanly without modifying upstream bundles or agent config.
+- `components/voicepilot/site-script.ts`:
+  - Restored `ADDON_LABELS` and `window.navigateToPage(pageId, options)` inside `VOICEPILOT_SCRIPT` (which commit `5f9dd0d` had previously moved out into `orai-widget.js`), keeping homepage tab navigation, section jumps, and `/pricing` / `/services` / `/booking` redirects functional without `/orai-widget.js`.
+- `tests/site.test.ts`:
+  - Added regression tests covering homepage-only rendering, removal of `/orai-widget.js` from `MarketingVoiceEmbed.tsx`, duplicate script/widget guards, preserved merchant embed assets, and `VOICEPILOT_SCRIPT` syntax / `window.navigateToPage` presence.
+
+### Verification & staging acceptance
+- **Independent verification (`orai-test-runner`)**:
+  - **All 5 test suites PASSED (83/83 total, 0 failed, 0 skipped):** `test:domain` (8/8), `test:security` (31/31), `test:booking` (8/8), `test:webhooks` (5/5), `test:managed-agent` (31/31).
+  - `typecheck` (0 errors), `lint` (0 errors, 9 pre-existing warnings in unrelated files), `next build` (31/31 routes), `git diff --check` PASSED.
+  - Local `next start` port `3012` smoke PASSED: `/`, `/beauty`, `/dashboard`, `/admin`, `/pricing`, `/services`, `/booking`, `/orai-widget.js`, `/embed.js` returned `200`; homepage omitted `/orai-widget.js` and defined `window.navigateToPage`; CSRF checks returned `403` (`Invalid request origin`) for missing/mismatched origins and `400` for same-origin empty auth requests. Smoke server stopped cleanly.
+- **Isolated staging deployment & live Edge Playwright acceptance (`orai-pr4-staging`)**:
+  - Deployed ONLY to `orai-pr4-staging`: `dpl_A7XspNtyCT7XiyDCQxHPGTnyJjNG` (`READY`), aliased at `https://orai-pr4-staging.vercel.app` (`https://orai-pr4-staging-n47rnyj6k-ronho1414.vercel.app`).
+  - Live `/` checks: `1` `<elevenlabs-convai>` (`agent-id="agent_8201m7sbetj3e36s1a2nv3fgcqna"`, `override-language="zh"`), `1` `https://unpkg.com/@elevenlabs/convai-widget-embed` `<script>`, `0` `orai-widget.js` scripts, Shadow DOM rendered (`Start a call` / `Message` visible & enabled), `#nav-tab-pricing` switched tabs cleanly, clicking `Start a call` -> `Accept` opened `wss://api.us.elevenlabs.io/v1/convai/conversation?...`, received `conversation_initiation_metadata_event` and initial `agent_response_event`, and closed cleanly via `End` with `0` `pageerror` and `0` `console.error`.
+  - Non-homepage isolation & SPA navigation: `/admin`, `/dashboard`, and `/beauty` rendered `0` `<elevenlabs-convai>` elements and `0` widget scripts; navigating `/beauty` -> `/` mounted `1` widget with `1` script; `/orai-widget.js` and `/embed.js` remained `200`.
+
+### Separate finding: `/api/client-config` HTTP 500 impact analysis
+- `GET /api/client-config?client=<slug>` calls `publicClientConfig(requested)` in `lib/admin/store.ts` without a `try/catch` in `app/api/client-config/route.ts`.
+- When `embed_clients` has no row for `<slug>` (such as `voicepilot-hq` on unseeded staging) or Supabase returns an error, `publicClientConfig` falls back to `readLocal()` -> `assertLocalAllowed()`, throwing `"Production requires a working database; local fallback is disabled"` under `NODE_ENV=production` and returning HTTP `500` instead of `404`.
+- **Impact scope:** Only external merchant embeds using `public/embed.js` against `/api/client-config` for a missing/unconfigured `client_slug` or DB failure are affected (failing closed without mounting). The Orai homepage (`/`), `/admin` (`/api/admin/*` routes call `listClients`/`listDocuments`/`listNotes`/`conversationReport`, which only fall back to `readLocal()` on DB error), `/dashboard`, `/beauty`, and `/api/platform/*` do NOT call `/api/client-config` and are unaffected.
+
+### Known caveats / remaining limitations
+- Until upstream `@elevenlabs/convai-widget-embed` supports language code `"yue"` (or the ElevenLabs agent's widget default language is changed from `"yue"`), `<elevenlabs-convai>` requires `override-language="zh"` on the homepage so the widget initializes without throwing `Cannot read properties of undefined (reading 'languageCode')`.
+- Because `/orai-widget.js` is no longer loaded on `/`, voice-triggered ElevenLabs client tools (`navigate_website`, `calculate_plan_cost`, `fill_booking_form`) that lived in `orai-widget.js` are excluded from the vanilla official widget (`site-script.ts` retains `window.navigateToPage` for site UI navigation).
+- Staging deployment uses `integrate/pr4-pr5-main` and remains gated by Vercel Authentication; Production merge/migrations/deploy remain blocked pending user acceptance.

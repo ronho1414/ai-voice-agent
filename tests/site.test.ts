@@ -6,6 +6,17 @@ import { createEmbedSnippet, isSiteIndexable, LEGACY_SITE_URL, OFFICIAL_SITE_URL
 import robots from '../app/robots';
 import sitemap from '../app/sitemap';
 import { isSameOriginMutation } from '../lib/platform/supabase-auth';
+import {
+  ensureOfficialWidgetScript,
+  hasCompetingWidget,
+  OFFICIAL_ELEVENLABS_AGENT_ID,
+  OFFICIAL_WIDGET_HOST_ATTR,
+  OFFICIAL_WIDGET_LANGUAGE_FALLBACK,
+  OFFICIAL_WIDGET_SCRIPT_ATTR,
+  OFFICIAL_WIDGET_SCRIPT_SRC,
+  shouldRenderOfficialWidget,
+} from '../components/voicepilot/MarketingVoiceEmbed';
+import { VOICEPILOT_SCRIPT } from '../components/voicepilot/site-script';
 
 const saved = { ...process.env };
 afterEach(() => {
@@ -77,4 +88,116 @@ test('new and legacy domains retain strict same-origin mutation protection', () 
     assert.equal(isSameOriginMutation(request('https://foreign.test', 'foreign.test')), false);
     assert.equal(isSameOriginMutation(request(origin === OFFICIAL_SITE_URL ? LEGACY_SITE_URL : OFFICIAL_SITE_URL)), false);
   }
+});
+
+test('official homepage widget renders only on root homepage and avoids legacy /orai-widget.js', () => {
+  assert.equal(OFFICIAL_ELEVENLABS_AGENT_ID, 'agent_8201m7sbetj3e36s1a2nv3fgcqna');
+  assert.equal(OFFICIAL_WIDGET_LANGUAGE_FALLBACK, 'zh');
+  assert.equal(OFFICIAL_WIDGET_SCRIPT_SRC, 'https://unpkg.com/@elevenlabs/convai-widget-embed');
+  assert.equal(shouldRenderOfficialWidget('/'), true);
+  for (const path of ['/admin', '/dashboard', '/beauty', '/pricing', '/services', '/booking', '', null, undefined]) {
+    assert.equal(shouldRenderOfficialWidget(path), false);
+  }
+
+  const embedSource = readFileSync('components/voicepilot/MarketingVoiceEmbed.tsx', 'utf8');
+  assert.ok(!embedSource.includes('/orai-widget.js'));
+  assert.ok(embedSource.includes('<elevenlabs-convai'));
+  assert.ok(readFileSync('orai-widget.js', 'utf8').includes('elevenlabs-convai'));
+  assert.ok(readFileSync('public/embed.js', 'utf8').includes('/api/client-config'));
+});
+
+test('official widget helpers prevent duplicate script injection and competing widget mounts', () => {
+  const appended: Array<Record<string, unknown>> = [];
+  const docStub = {
+    body: {
+      appendChild(node: Record<string, unknown>) {
+        appended.push(node);
+        return node;
+      },
+    },
+    createElement(tag: string) {
+      assert.equal(tag, 'script');
+      const attrs: Record<string, string> = {};
+      return {
+        src: '',
+        async: false,
+        type: '',
+        attrs,
+        setAttribute(k: string, v: string) {
+          attrs[k] = v;
+        },
+      };
+    },
+    querySelector(selector: string) {
+      if (selector.includes(OFFICIAL_WIDGET_SCRIPT_SRC)) {
+        return appended.length > 0 ? appended[0] : null;
+      }
+      return null;
+    },
+  } as unknown as Document;
+
+  const first = ensureOfficialWidgetScript(docStub);
+  assert.ok(first);
+  assert.equal(appended.length, 1);
+  assert.equal(appended[0].src, OFFICIAL_WIDGET_SCRIPT_SRC);
+  assert.equal(appended[0].async, true);
+  assert.equal(appended[0].type, 'text/javascript');
+  assert.equal((appended[0].attrs as Record<string, string>)[OFFICIAL_WIDGET_SCRIPT_ATTR], 'true');
+
+  const second = ensureOfficialWidgetScript(docStub);
+  assert.equal(second, first);
+  assert.equal(appended.length, 1);
+
+  const emptyDocWithDefinedElement = {
+    body: {
+      appendChild() {
+        assert.fail('must not append duplicate script when custom element is already defined');
+      },
+    },
+    createElement() {
+      assert.fail('must not create duplicate script when custom element is already defined');
+    },
+    querySelector() {
+      return null;
+    },
+  } as unknown as Document;
+  const skipped = ensureOfficialWidgetScript(emptyDocWithDefinedElement, {
+    customElements: { get: (name: string) => (name === 'elevenlabs-convai' ? (class {} as CustomElementConstructor) : undefined) },
+  } as Pick<Window, 'customElements'>);
+  assert.equal(skipped, null);
+
+  const ownHost = { contains: (el: unknown) => el === ownWidget } as unknown as Element;
+  const ownWidget = {} as Element;
+  const foreignWidget = {} as Element;
+  const otherHost = {} as Element;
+
+  assert.equal(
+    hasCompetingWidget(
+      { querySelector: (sel: string) => (sel === 'elevenlabs-convai' ? ownWidget : ownHost) } as unknown as Document,
+      ownHost,
+    ),
+    false,
+  );
+  assert.equal(
+    hasCompetingWidget(
+      { querySelector: (sel: string) => (sel === 'elevenlabs-convai' ? foreignWidget : null) } as unknown as Document,
+      ownHost,
+    ),
+    true,
+  );
+  assert.equal(
+    hasCompetingWidget(
+      {
+        querySelector: (sel: string) =>
+          sel.includes(OFFICIAL_WIDGET_HOST_ATTR) ? otherHost : null,
+      } as unknown as Document,
+      ownHost,
+    ),
+    true,
+  );
+});
+
+test('homepage navigation script still defines valid window.navigateToPage without /orai-widget.js', () => {
+  assert.ok(VOICEPILOT_SCRIPT.includes('window.navigateToPage'));
+  assert.doesNotThrow(() => new Function(VOICEPILOT_SCRIPT));
 });
