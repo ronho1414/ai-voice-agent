@@ -271,8 +271,13 @@ test('homepage ElevenLabs client tools attach, preserve existing tools, and dele
     tools.navigate_website({ pageId: 'pricing', section: 'onboarding-timeline-pricing', selectedAddon: 'crm', requestVoiceSample: true }),
     'Navigated to pricing',
   );
+  assert.equal(
+    tools.navigate_website({ page: '/booking', section_id: '#demo-booking-form', selected_addon: 'whatsapp', request_voice_sample: 'true' }),
+    'Navigated to home',
+  );
   assert.deepEqual(navCalls, [
     ['pricing', { sectionId: 'onboarding-timeline-pricing', selectedAddon: 'crm', requestVoiceSample: true }],
+    ['home', { sectionId: 'demo-booking-form', selectedAddon: 'whatsapp', requestVoiceSample: true }],
   ]);
   assert.equal(tools.calculate_plan_cost({ minutes: 1200 }), 'Calculator updated');
   assert.deepEqual(calcCalls, [{ minutes: 1200 }]);
@@ -287,10 +292,11 @@ test('homepage ElevenLabs client tools attach, preserve existing tools, and dele
   for (const id of ['company-name', 'contact-person', 'contact-phone', 'website-url', 'lead-form', 'lead-form-success', 'selected-addon-banner', 'selected-addon-banner-text', 'request-voice-sample']) {
     values.set(id, { id, value: '', checked: false, classList: { add() {}, remove() {} }, dispatchEvent() {}, focus() {} });
   }
-  const addonNav = { id: 'addon-nav', value: '網頁自動跳轉導航', checked: false, classList: { add() {}, remove() {} }, dispatchEvent() {} };
+  const addonNav = { id: 'addon-nav', value: '網頁自動跳轉導航', checked: false, classList: { add(): void {}, remove(): void {} }, dispatchEvent(): void {} };
+  const addonCrm = { id: 'addon-crm', value: 'CRM / 預約系統雙向 API 串接', checked: false, classList: { add(): void {}, remove(): void {} }, dispatchEvent(): void {} };
   const docStub = {
     getElementById: (id: string) => values.get(id) ?? null,
-    querySelectorAll: () => [addonNav],
+    querySelectorAll: () => [addonNav, addonCrm],
   } as unknown as Document;
   const winStub = {
     setTimeout: ((fn: () => void) => {
@@ -304,19 +310,46 @@ test('homepage ElevenLabs client tools attach, preserve existing tools, and dele
   } as unknown as OraiWindow;
 
   installHomepageActionHandlers(docStub, winStub);
-  const fillResult = await winStub.fillBookingForm!({
-    company: 'Test Corp',
+
+  // Turn 1: partial fill using legacy/capitalized aliases ("Phone", "website") + unsupported "selectedPlan"
+  const turn1Raw = await winStub.fillBookingForm!({
+    companyName: 'Test Corp',
     contactPerson: 'Chris',
-    phone: '91234567',
-    website: 'https://test.example',
+    Phone: '91234567',
+    website: 'https://legacy.example',
+    selectedPlan: 'Growth',
     addons: ['nav'],
-    requestVoiceSample: true,
   });
-  assert.equal(fillResult, 'Booking form filled');
+  const turn1 = JSON.parse(String(turn1Raw));
+  assert.equal(turn1.ok, true);
+  assert.equal(turn1.status, 'ready_for_user_submit');
+  assert.equal(turn1.submitted, false);
+  assert.deepEqual(turn1.unsupportedFields, ['selectedPlan']);
   assert.equal(values.get('company-name')!.value, 'Test Corp');
   assert.equal(values.get('contact-person')!.value, 'Chris');
   assert.equal(values.get('contact-phone')!.value, '91234567');
-  assert.equal(values.get('website-url')!.value, 'https://test.example');
+  assert.equal(values.get('website-url')!.value, 'https://legacy.example');
   assert.equal(addonNav.checked, true);
+
+  // Turn 2: incremental update using canonical keys ("websiteUrl", "addons", "requestVoiceSample") preserves Turn 1 values
+  const turn2Raw = await winStub.fillBookingForm!({
+    websiteUrl: 'https://canonical.example',
+    addons: ['crm'],
+    requestVoiceSample: 'true',
+  });
+  const turn2 = JSON.parse(String(turn2Raw));
+  assert.equal(turn2.ok, true);
+  assert.equal(turn2.status, 'ready_for_user_submit');
+  assert.equal(turn2.submitted, false);
+  assert.equal(values.get('company-name')!.value, 'Test Corp');
+  assert.equal(values.get('contact-person')!.value, 'Chris');
+  assert.equal(values.get('contact-phone')!.value, '91234567');
+  assert.equal(values.get('website-url')!.value, 'https://canonical.example');
+  assert.equal(addonNav.checked, true);
+  assert.equal(addonCrm.checked, true);
   assert.equal(values.get('request-voice-sample')!.checked, true);
+  assert.equal(
+    (values.get('selected-addon-banner-text') as unknown as { textContent: string }).textContent,
+    '✓ 已為你勾選：網頁自動跳轉導航、CRM / 預約系統雙向 API 串接',
+  );
 });
