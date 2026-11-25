@@ -1,6 +1,6 @@
 # Orai Service — Project Status & Security Review
 
-> Latest milestone (2026-11-25): PR #5 UI89f393c is READY on https://orai-pr4-staging.vercel.app. Customer/admin preferences now show only gender/style/greeting, with green change highlights. Independent23-test/type/lint/build/SSR gate and real staging browser checks passed. Historical data preserved; no new migration/provider change or production deployment. Prior staging/conflict-recovery milestones below remain chronological.
+> Latest milestone (2026-11-25): PR #5 duplicate409 fix560b6d8 is READY on the existing isolated staging. Independent71-test/type/lint/build gate and real Edge duplicate/stale-code/tenant browser regressions passed. Three-field green UI is preserved. Separately, explicitly approved staging admin password sync from local env was verified with real Auth/app/admin access. No production changes or PR merge.
 
 **Date:** 2026-11-24  
 **Branch:** `main` (commit `a258a51`)  
@@ -1105,3 +1105,63 @@ selection/comparison values green. Desktop screenshot visually inspected.
 No product data was submitted during this browser check; test sessions logged out.
 FAILED: none. NOT VERIFIED: physical mobile-device visual behavior in this pass.
 No migration, provider configuration, production deployment or PR merge.
+
+## Duplicate-open-request409 routing and staging admin login — 2026-11-25
+
+Code fix560b6d8 distinguishes public structured error codes:
+DUPLICATE_OPEN_REQUEST, STALE_ACTIVE_PREFERENCES, STALE_REQUEST_VERSION,
+IDEMPOTENCY_KEY_REUSED and REQUEST_CONFLICT. Existing RPC exception text is mapped
+at the server boundary; raw database details never reach clients. No new SQL
+migration is required. Duplicate lookup is bound to the verified session tenant
+and exact normalized payload/open statuses; only id/reference are returned.
+
+Duplicates retain the draft and frozen attempt/key, show an existing-request
+button and block identical resubmission. They do not initiate stale-version
+review or automatically repost. Different edited intent can use a new key.
+Viewing a matching terminal request releases the duplicate block. A missing-ID
+race can match the authorized history row by normalized payload/notes; resolving
+an older duplicate never clears a newer attempt's retry key. Only the structured
+stale-active code enters the existing review/fetch/reconfirm workflow.
+
+Independent gate PASSED: security31/webhook5/booking8/managed27 (71tests),
+typecheck/lint/build and loopback HTTP smoke. Lint0errors/9existingwarnings.
+Focused tests cover distinctcodes, tenant-bound lookup, retained attempts/drafts,
+blocked duplicate loops, terminal fallback and newer-attempt preservation.
+Independent extra mocked B-tenant lookup and sanitized503failure checks passed.
+Simplified3field UI and green highlights are preserved.
+
+Separate login issue: user had changed ADMIN_PASSWORD in local.env, which does
+not update hosted Supabase Auth. The example.test email cannot receive recovery
+mail. After explicit user approval, the chosen local ADMIN_PASSWORD was applied
+only to orai-staging-admin@example.test in wnajobvcldveajtdvbwg. Actual Supabase
+password login, deployed app login and Super Admin API access passed200. Test
+session logged out; credentials were not displayed, copied into account fixtures
+or committed. No production password/data/config change was made.
+
+Staging READY: code560b6d8c322ef1167f840e2b2e4baa07ca3db2ec,
+deployment dpl_AH9BpVsS1t9SYe3FwS8zK3bfCSRY, existing project/domain
+https://orai-pr4-staging.vercel.app . No new resources or migrations.
+
+Real Edge browser acceptance PASSED:
+- An identical open request returned409/DUPLICATE_OPEN_REQUEST and its own
+  reference; the in-app link opened the real detail. Draft/notes survived and
+  no stale-review panel or automatic repeat POST appeared across a15second poll.
+- Merchant B could not access A's request and an identical B request's duplicate
+  response pointed only to B's own ID.
+- Cancelling the existing request released the duplicate block, preserving the
+  draft; explicit resubmission used a new key and created one intentional row.
+- A separate real server version-conflict409 returned STALE_ACTIVE_PREFERENCES;
+  the existing fetch/review/reconfirm path recovered successfully. The harness
+  injected a mismatching wire base_version to exercise this without provider or
+  active-setting mutations. The three-field UI/green greeting remained intact.
+
+Final SQL confirmed REQ-000011(original duplicate), REQ-000013(intentional new)
+and REQ-000014(stale recovery) all cancelled after QA; active version remained3.
+The initial test harness omitted the protection header for PATCH; corrected
+origin-scoped header handling and resumed the same request instead of recreating
+passed fixtures. This was a test transport issue, not an app login failure.
+
+FAILED: no unresolved product failures. NOT VERIFIED: physical-device rendering,
+actual ElevenLabs updates, email/scheduled delivery and full backup restore remain
+outside this focused fix. No production merge/deployment/config/data changes.
+Ignored test scripts/results and local passwords were not committed.
