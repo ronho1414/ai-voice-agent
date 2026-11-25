@@ -10,6 +10,7 @@ import {
   ensureOfficialWidgetScript,
   hasCompetingWidget,
   OFFICIAL_ELEVENLABS_AGENT_ID,
+  OFFICIAL_WIDGET_DEFAULT_LANGUAGE,
   OFFICIAL_WIDGET_HOST_ATTR,
   OFFICIAL_WIDGET_SCRIPT_ATTR,
   OFFICIAL_WIDGET_SCRIPT_SRC,
@@ -17,6 +18,12 @@ import {
   shouldRenderOfficialWidget,
 } from '../components/voicepilot/MarketingVoiceEmbed';
 import { VOICEPILOT_SCRIPT } from '../components/voicepilot/site-script';
+import {
+  attachClientToolsListener,
+  buildHomepageClientTools,
+  installHomepageActionHandlers,
+  type OraiWindow,
+} from '../lib/embed/orai-client-tools';
 
 const saved = { ...process.env };
 afterEach(() => {
@@ -92,6 +99,7 @@ test('new and legacy domains retain strict same-origin mutation protection', () 
 
 test('official homepage widget renders only on root homepage and avoids legacy /orai-widget.js', () => {
   assert.equal(OFFICIAL_ELEVENLABS_AGENT_ID, 'agent_8201m7sbetj3e36s1a2nv3fgcqna');
+  assert.equal(OFFICIAL_WIDGET_DEFAULT_LANGUAGE, 'yue');
   assert.equal(OFFICIAL_WIDGET_SCRIPT_SRC, 'https://unpkg.com/@elevenlabs/convai-widget-embed');
   assert.equal(shouldRenderOfficialWidget('/'), true);
   for (const path of ['/admin', '/dashboard', '/beauty', '/pricing', '/services', '/booking', '', null, undefined]) {
@@ -220,4 +228,95 @@ test('official widget helpers prevent duplicate script injection and competing w
 test('homepage navigation script still defines valid window.navigateToPage without /orai-widget.js', () => {
   assert.ok(VOICEPILOT_SCRIPT.includes('window.navigateToPage'));
   assert.doesNotThrow(() => new Function(VOICEPILOT_SCRIPT));
+});
+
+test('homepage ElevenLabs client tools attach, preserve existing tools, and delegate navigation and form fill', async () => {
+  const navCalls: Array<[string, unknown]> = [];
+  const calcCalls: unknown[] = [];
+  const formCalls: unknown[] = [];
+  const listeners = new Map<string, Set<(event: Event) => void>>();
+
+  const fakeWin = {
+    navigateToPage: (page: string, options?: unknown) => navCalls.push([page, options]),
+    calculatePlanCost: (params?: unknown) => {
+      calcCalls.push(params);
+      return 'Calculator updated';
+    },
+    fillBookingForm: (params?: unknown) => {
+      formCalls.push(params);
+      return 'Booking form filled';
+    },
+  } as unknown as OraiWindow;
+
+  const target = {
+    addEventListener(type: string, cb: (event: Event) => void) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type)!.add(cb);
+    },
+    removeEventListener(type: string, cb: (event: Event) => void) {
+      listeners.get(type)?.delete(cb);
+    },
+  };
+
+  const detach = attachClientToolsListener(target, () => buildHomepageClientTools(fakeWin));
+  const customTool = () => 'kept';
+  const callDetail = { config: { clientTools: { existing_tool: customTool } as Record<string, unknown> } };
+  for (const cb of listeners.get('elevenlabs-convai:call') ?? []) {
+    cb({ detail: callDetail } as unknown as Event);
+  }
+
+  const tools = callDetail.config.clientTools as Record<string, (p?: Record<string, unknown>) => unknown>;
+  assert.equal(tools.existing_tool, customTool);
+  assert.equal(
+    tools.navigate_website({ pageId: 'pricing', section: 'onboarding-timeline-pricing', selectedAddon: 'crm', requestVoiceSample: true }),
+    'Navigated to pricing',
+  );
+  assert.deepEqual(navCalls, [
+    ['pricing', { sectionId: 'onboarding-timeline-pricing', selectedAddon: 'crm', requestVoiceSample: true }],
+  ]);
+  assert.equal(tools.calculate_plan_cost({ minutes: 1200 }), 'Calculator updated');
+  assert.deepEqual(calcCalls, [{ minutes: 1200 }]);
+  assert.equal(tools.fill_booking_form({ companyName: 'Orai Test', addons: 'nav,whatsapp' }), 'Booking form filled');
+  assert.deepEqual(formCalls, [{ companyName: 'Orai Test', addons: 'nav,whatsapp' }]);
+
+  detach();
+  assert.equal(listeners.get('elevenlabs-convai:call')?.size ?? 0, 0);
+
+  // Verify installHomepageActionHandlers fills booking form inputs and checkboxes cleanly
+  const values = new Map<string, { value: string; checked: boolean; id: string; classList: { add(): void; remove(): void }; dispatchEvent(): void; focus(): void }>();
+  for (const id of ['company-name', 'contact-person', 'contact-phone', 'website-url', 'lead-form', 'lead-form-success', 'selected-addon-banner', 'selected-addon-banner-text', 'request-voice-sample']) {
+    values.set(id, { id, value: '', checked: false, classList: { add() {}, remove() {} }, dispatchEvent() {}, focus() {} });
+  }
+  const addonNav = { id: 'addon-nav', value: '網頁自動跳轉導航', checked: false, classList: { add() {}, remove() {} }, dispatchEvent() {} };
+  const docStub = {
+    getElementById: (id: string) => values.get(id) ?? null,
+    querySelectorAll: () => [addonNav],
+  } as unknown as Document;
+  const winStub = {
+    setTimeout: ((fn: () => void) => {
+      fn();
+      return 1;
+    }) as unknown as typeof setTimeout,
+    setInterval: globalThis.setInterval,
+    clearInterval: globalThis.clearInterval,
+    matchMedia: () => ({ matches: true } as MediaQueryList),
+    navigateToPage: (page: string, options?: unknown) => navCalls.push([page, options]),
+  } as unknown as OraiWindow;
+
+  installHomepageActionHandlers(docStub, winStub);
+  const fillResult = await winStub.fillBookingForm!({
+    company: 'Test Corp',
+    contactPerson: 'Chris',
+    phone: '91234567',
+    website: 'https://test.example',
+    addons: ['nav'],
+    requestVoiceSample: true,
+  });
+  assert.equal(fillResult, 'Booking form filled');
+  assert.equal(values.get('company-name')!.value, 'Test Corp');
+  assert.equal(values.get('contact-person')!.value, 'Chris');
+  assert.equal(values.get('contact-phone')!.value, '91234567');
+  assert.equal(values.get('website-url')!.value, 'https://test.example');
+  assert.equal(addonNav.checked, true);
+  assert.equal(values.get('request-voice-sample')!.checked, true);
 });

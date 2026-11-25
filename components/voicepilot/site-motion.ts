@@ -495,7 +495,9 @@ function wrapInteractions(gsap: Gsap): void {
 
 function clickStartCall(): boolean {
   const widget = document.querySelector("elevenlabs-convai");
-  const button = widget?.shadowRoot?.querySelector('button[aria-label="Start a call"]');
+  const button = widget?.shadowRoot?.querySelector(
+    'button[aria-label="Start a call"], button[aria-label="开始通话"], button[aria-label="開始通話"]',
+  );
   if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
   button.click();
   return true;

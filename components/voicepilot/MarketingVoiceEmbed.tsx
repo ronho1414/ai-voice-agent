@@ -2,8 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import {
+  attachClientToolsListener,
+  buildHomepageClientTools,
+  installHomepageActionHandlers,
+  type OraiWindow,
+} from "@/lib/embed/orai-client-tools";
 
 export const OFFICIAL_ELEVENLABS_AGENT_ID = "agent_8201m7sbetj3e36s1a2nv3fgcqna";
+export const OFFICIAL_WIDGET_DEFAULT_LANGUAGE = "yue";
 export const OFFICIAL_WIDGET_SCRIPT_SRC = "https://unpkg.com/@elevenlabs/convai-widget-embed";
 export const OFFICIAL_WIDGET_SCRIPT_ATTR = "data-elevenlabs-convai-embed";
 export const OFFICIAL_WIDGET_HOST_ATTR = "data-orai-official-widget-host";
@@ -21,6 +28,7 @@ declare module "react" {
       "elevenlabs-convai": React.DetailedHTMLProps<
         React.HTMLAttributes<HTMLElement> & {
           "agent-id": string;
+          language?: string;
         },
         HTMLElement
       >;
@@ -148,9 +156,14 @@ export function MarketingVoiceEmbed() {
 
     host.setAttribute(OFFICIAL_WIDGET_HOST_ATTR, "active");
     setShouldMountWidget(true);
+    installHomepageActionHandlers(document, window as OraiWindow);
+    const detachClientTools = attachClientToolsListener(document, () =>
+      buildHomepageClientTools(window as OraiWindow),
+    );
     void ensureOfficialWidgetScript(document, window);
 
     return () => {
+      detachClientTools();
       if (host.getAttribute(OFFICIAL_WIDGET_HOST_ATTR) === "active") {
         host.removeAttribute(OFFICIAL_WIDGET_HOST_ATTR);
       }
@@ -162,7 +175,13 @@ export function MarketingVoiceEmbed() {
 
   return (
     <div ref={hostRef}>
-      {shouldMountWidget ? <elevenlabs-convai agent-id={OFFICIAL_ELEVENLABS_AGENT_ID} /> : null}
+      {shouldMountWidget ? (
+        /* Set initial language="yue" so zh-HK/zh browsers start in Cantonese instead of auto-switching while keeping the language picker active. */
+        <elevenlabs-convai
+          agent-id={OFFICIAL_ELEVENLABS_AGENT_ID}
+          language={OFFICIAL_WIDGET_DEFAULT_LANGUAGE}
+        />
+      ) : null}
     </div>
   );
 }
