@@ -1199,9 +1199,32 @@ No SQL/RLS migration, production deployment, or merge was performed.
 
 ## Integration branch (`integrate/pr4-pr5-main`) — 2026-11-25
 
-- Created clean branch `integrate/pr4-pr5-main` from `origin/main` (`bb7b371`, containing merged PR #6) and merged `origin/codex/managed-agent-requests` (`a7bd916`, containing PR #4 + PR #5 + local doc commits `a69cb86`/`48fc0f7`), preserving all pre-existing uncommitted work in the primary checkout untouched.
+- Created clean branch `integrate/pr4-pr5-main` from `origin/main` (`bb7b371`, containing merged PR #6) and merged `origin/codex/managed-agent-requests` (`a7bd916`, containing PR #4 + PR #5 + local doc commits `a69cb86`/`48fc0f7`), producing merge commit `f1b5032`. Pre-existing uncommitted edits and local-only commits in `C:\Users\ronho\Projects\ai-voice-agent` were preserved untouched.
 - Conflict resolution:
   - `.env.example`: kept PR #6 site/indexing variables plus PR #4 publishable Supabase key, auth notes and `ELEVENLABS_WEBHOOK_SECRET` (removed obsolete `ADMIN_PASSWORD`).
   - `package.json`: retained all 5 test suites (`test:domain`, `test:security`, `test:booking`, `test:webhooks`, `test:managed-agent`) and `@elevenlabs/elevenlabs-js`.
   - `vercel.json`: kept `regions: ["hkg1"]` and disabled automatic git deployments on non-main PR/integration branches.
   - `docs/PROJECT_STATUS.md`: preserved PR #6 domain summary, PR #4/#5 milestones, and integration records.
+
+### Independent verification on `f1b5032` (`orai-test-runner`)
+- **All 5 test suites PASSED (80/80 total, 0 failed, 0 skipped):**
+  - `test:domain`: 5/5 passed
+  - `test:security`: 31/31 passed (mocked HTTP + PGlite RLS)
+  - `test:booking`: 8/8 passed (mocked HTTP + disk PGlite)
+  - `test:webhooks`: 5/5 passed (mocked DB/SDK)
+  - `test:managed-agent`: 31/31 passed (PGlite SQL/RLS + mocked API + draft/reconciler unit tests)
+- `typecheck` (0 errors), `lint` (0 errors, 9 pre-existing warnings in unrelated voice/widget files), and `next build` (Next.js 15.5.29, 31/31 static pages) PASSED.
+- Port 3013 `next start` HTTP smoke: `/`, `/beauty`, `/dashboard`, `/admin`, `/pricing`, `/services`, `/booking`, `/robots.txt` (`Disallow: /`), `/sitemap.xml` (empty) -> `200`; `OPTIONS /api/client-config` -> `204`; unsigned `POST /api/webhooks/elevenlabs` -> `503` (missing secret); `GET /api/platform/customer/change-requests` & same-origin `POST .../lookup` (`127.0.0.1` & `localhost`) -> `401`; missing/foreign `Origin` `POST .../lookup` -> `403`. Smoke server stopped cleanly.
+- Observation (pre-existing `lib/admin/store.ts` behavior): `GET /api/client-config?client=voicepilot-hq` returned `500` in unconfigured `next start` (and on staging where `embed_clients` has no row for `voicepilot-hq`), because `publicClientConfig` falls into `readLocal()` -> `assertLocalAllowed()` under `NODE_ENV=production` when `embed_clients` returns no data/errors.
+
+### Integrated staging deployment & live acceptance (`f1b5032`)
+- Deployed `f1b5032` ONLY to isolated staging `orai-pr4-staging`: deployment `dpl_CEChMD1m74G3FR9X1nQz3t8w9w6s` (`READY`) at `https://orai-pr4-staging.vercel.app` (alias `https://orai-pr4-staging-22g0a4gqj-ronho1414.vercel.app`).
+- Verified PR #6 safe staging defaults live: `/` emits `noindex`, `/robots.txt` (`200`) returns `User-Agent: *` / `Disallow: /`, `/sitemap.xml` (`200`) is empty, `/pricing` / `/services` / `/booking` / `/beauty` / `/dashboard` / `/admin` return `200`, `OPTIONS /api/client-config` returns `204`.
+- Verified PR #4 routes live: unsigned `POST /api/webhooks/elevenlabs` returns `401` (`Invalid signature`), unauthenticated `/api/platform/customer/conversations` returns `401`.
+- Verified PR #5 duplicate-lock reconciliation & `/lookup` live (all 6 real Edge browser + hosted PostgREST checks passed on `dpl_CEChMD1m74G3FR9X1nQz3t8w9w6s`, with test sessions signed out cleanly).
+
+### Remaining blockers before `main` merge / production release
+- User acceptance of the integrated staging deployment `dpl_CEChMD1m74G3FR9X1nQz3t8w9w6s`.
+- Production database migrations (`20261124055712_elevenlabs_post_call.sql`, `20261124103151_immutable_agent_ownership.sql`, `20261124160158_managed_agent_requests.sql`), Production Supabase Auth / `super_admin` provisioning, and Production Vercel environment alignment (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` / `ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ELEVENLABS_WEBHOOK_SECRET`, and `NEXT_PUBLIC_SITE_URL` / `NEXT_PUBLIC_SITE_INDEXING=true`) remain unapplied and gated on explicit Production approval.
+- Pre-existing `/api/client-config` missing-row `500` handling in `lib/admin/store.ts` (when `embed_clients` has no row under `NODE_ENV=production`) should be reviewed before relying on public embed snippets against a fresh Supabase DB.
+- Phase 2 features (email delivery, scheduled overdue notifications, ElevenLabs PII redaction/retention/deletion automation, physical mobile device testing) remain outside scope.
