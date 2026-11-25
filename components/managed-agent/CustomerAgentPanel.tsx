@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ChangeRequest, RequestEvent } from "@/lib/platform/agent-preferences";
 import { submissionFeedback, visiblePreferenceKeys } from "@/lib/platform/agent-preferences";
-import { initialPreferenceDraft, preferenceDraftTransition, reviewedPreferences } from "@/lib/platform/agent-preference-draft";
+import { initialPreferenceDraft, isDuplicateDraft, matchesDuplicateRequest, preferenceDraftTransition, reviewedPreferences } from "@/lib/platform/agent-preference-draft";
 import { PreferenceFields, PreferenceReadonly } from "./PreferenceFields";
 import {
   MANAGED_REFRESH_EVENT,
@@ -144,6 +144,10 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
     try {
       const body = await apiJson<DetailResponse>(`/api/platform/customer/change-requests?id=${encodeURIComponent(id)}`);
       setDetail(body.request);
+      if (matchesDuplicateRequest(formRef.current, body.request) && ["cancelled", "rejected", "completed"].includes(body.request.status)) {
+        changeForm({ type: "duplicate_resolved" });
+        setFormError("");
+      }
       setEvents(Array.isArray(body.events) ? body.events : []);
       setDetailError("");
     } catch (err) {
@@ -155,7 +159,7 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
     } finally {
       if (!soft) setDetailLoading(false);
     }
-  }, []);
+  }, [changeForm]);
 
   useEffect(() => {
     void loadAgent();
@@ -202,6 +206,7 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
   }
 
   function validateBeforeConfirm(): string | null {
+    if (isDuplicateDraft(formRef.current)) return "已有相同要求正在處理中，請先查看現有要求。";
     if (formRef.current.reviewRequired || formRef.current.needsRefresh) return "請先覆核最新設定；你的草稿已保留。";
     if (agentError || agentLoading) return "請先成功載入目前生效設定，再提交調整。";
     const changes = changedFields(activeSettings, draft);
@@ -252,9 +257,14 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
       dispatchManagedRefresh();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        changeForm({ type: "conflict" });
         setConfirmOpen(false);
-        await loadAgent();
+        if (err.code === "DUPLICATE_OPEN_REQUEST") {
+          changeForm({ type: "duplicate", existingRequest: err.existingRequest });
+          await loadHistory(1);
+        } else if (err.code === "STALE_ACTIVE_PREFERENCES") {
+          changeForm({ type: "conflict" });
+          await loadAgent();
+        }
       }
       setFormError(err instanceof Error ? err.message : "提交失敗");
       // Keep idempotency key for network/failure retry of the same payload.
@@ -362,6 +372,22 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
           </div>
         )}
 
+        {isDuplicateDraft(form) && (
+          <section aria-label="已有相同調整要求" className="space-y-3 rounded-2xl border border-[#E4E4E7] bg-[#FAFAFA] p-4">
+            <h3 className="text-sm font-extrabold">已有相同要求正在處理中</h3>
+            <p className="text-xs text-[#52525B]">毋須再提交；你的偏好草稿及備註已保留。你可以查看現有要求，或修改內容後再提交不同的調整。</p>
+            <button type="button" className="rounded-xl bg-[#09090B] px-4 py-2 text-xs font-bold text-white" onClick={async () => {
+              if (form.duplicateRequest) {
+                await loadDetail(form.duplicateRequest.id);
+                document.getElementById("agent-request-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              } else {
+                await loadHistory(1);
+                document.getElementById("agent-request-history")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }
+            }}>{form.duplicateRequest ? `查看現有要求 ${form.duplicateRequest.reference}` : "查看調整記錄"}</button>
+          </section>
+        )}
+
         {form.reviewRequired && (
           <section aria-label="覆核設定衝突" className="space-y-4 rounded-2xl border border-[#09090B] bg-[#FAFAFA] p-4">
             <h3 className="text-sm font-extrabold">請覆核最新設定</h3>
@@ -419,7 +445,7 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
           <button
             type="button"
             onClick={openConfirm}
-            disabled={agentLoading || Boolean(agentError) || submitting || form.reviewRequired || form.needsRefresh || (preferencesEqual(activeSettings, draft) && !notes.trim())}
+            disabled={agentLoading || Boolean(agentError) || submitting || isDuplicateDraft(form) || form.reviewRequired || form.needsRefresh || (preferencesEqual(activeSettings, draft) && !notes.trim())}
             className="rounded-xl bg-[#09090B] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#27272A] disabled:opacity-50"
           >
             提交調整要求
@@ -427,7 +453,7 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
         </div>
       </section>
 
-      <section className="space-y-4">
+      <section id="agent-request-history" className="space-y-4">
         <div className="flex items-end justify-between gap-3">
           <div>
             <h2 className="text-base font-extrabold">調整紀錄</h2>
@@ -507,7 +533,7 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
       </section>
 
       {selectedId && (
-        <section className="space-y-4 rounded-3xl border border-[#E4E4E7] bg-white p-6 shadow-stripe-sm">
+        <section id="agent-request-detail" className="space-y-4 rounded-3xl border border-[#E4E4E7] bg-white p-6 shadow-stripe-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-extrabold">要求詳情</h2>

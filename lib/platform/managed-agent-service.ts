@@ -2,8 +2,9 @@ import { createClient } from "@supabase/supabase-js";
 import type { PlatformSession } from "./types";
 import { emptyPreferences, parsePreferences, statusLabels, type ChangeRequest } from "./agent-preferences";
 import { requestSupabase } from "./supabase-auth";
+import { managedConflictCode, type ExistingChangeRequest, type ManagedConflictCode } from "./managed-agent-errors";
 
-export class ManagedError extends Error { constructor(message: string, public status = 400) { super(message); } }
+export class ManagedError extends Error { constructor(message: string, public status = 400, public code?: ManagedConflictCode, public existingRequest?: ExistingChangeRequest) { super(message); } }
 export function serviceDatabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new ManagedError("資料服務尚未設定，請聯絡 Orai。", 503);
@@ -48,14 +49,25 @@ export async function command(session: PlatformSession, operation: string, body:
   }
   const { data, error } = await serviceDatabase().rpc("managed_agent_command", { actor_id: session.userId, tenant_id: session.organizationId || null, operation, payload });
   if (error) {
-    if (error.message?.includes("conflict:")) throw new ManagedError("資料已更新或相同要求仍在處理中，請覆核最新設定或查看調整記錄。", 409);
+    const code = managedConflictCode(error.message || "");
+    if (code === "DUPLICATE_OPEN_REQUEST") {
+      // Tenant comes exclusively from the verified session. Never return a
+      // request ID supplied by the client or untrusted exception text.
+      const { data: existing, error: lookupError } = await serviceDatabase().from("agent_change_requests")
+        .select("id,reference").eq("organization_id", session.organizationId!)
+        .eq("requested_settings", JSON.stringify(payload.preferences)).eq("additional_notes", payload.additional_notes)
+        .in("status", ["pending", "in_progress", "needs_information"]).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (lookupError) throw new ManagedError("未能載入現有要求，請稍後重試。", 503);
+      throw new ManagedError("已有相同的調整要求正在處理中，毋須重複提交。你的草稿已保留。", 409, code, existing ?? undefined);
+    }
+    if (code) throw new ManagedError(code === "IDEMPOTENCY_KEY_REUSED" ? "此提交編號已用於另一要求，請修改內容後再確認提交。" : "資料已更新，請覆核最新設定或查看調整記錄。", 409, code);
     if (error.code === "42501") throw new ManagedError("你沒有權限執行此操作。", 403);
     if (["P0001", "23514", "22P02", "23502"].includes(error.code || "")) throw new ManagedError("操作未完成，請檢查內容、原因及要求狀態。");
     throw new ManagedError("未能儲存，請稍後重試。", 503);
   }
   return data;
 }
-export function managedFailure(error: unknown) { return Response.json({ error: error instanceof Error ? (error instanceof ManagedError ? error.message : "資料服務暫時無法使用。") : "操作失敗。" }, { status: error instanceof ManagedError ? error.status : 503 }); }
+export function managedFailure(error: unknown) { return Response.json({ error: error instanceof Error ? (error instanceof ManagedError ? error.message : "資料服務暫時無法使用。") : "操作失敗。", ...(error instanceof ManagedError && error.code ? { code: error.code } : {}), ...(error instanceof ManagedError && error.existingRequest ? { existing_request: error.existingRequest } : {}) }, { status: error instanceof ManagedError ? error.status : 503 }); }
 export async function activePreferences(request: Request, org: string) {
   const { data, error } = await requestSupabase(request).from("agent_preferences").select("settings,version,curated_voice_id").eq("organization_id", org).maybeSingle();
   if (error) throw new ManagedError("未能載入生效偏好，請稍後重試。", 503);

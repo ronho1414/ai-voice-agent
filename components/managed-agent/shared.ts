@@ -7,6 +7,7 @@ import {
   type Preferences,
   type RequestStatus,
 } from "@/lib/platform/agent-preferences";
+import type { ExistingChangeRequest } from "@/lib/platform/managed-agent-errors";
 
 export const MANAGED_REFRESH_EVENT = "orai-managed-refresh";
 export const NOTES_MAX = 2000;
@@ -26,7 +27,7 @@ export function dispatchManagedRefresh() {
 }
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number) { super(message); }
+  constructor(message: string, public status: number, public code?: string, public existingRequest?: ExistingChangeRequest) { super(message); }
 }
 
 export async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -49,9 +50,12 @@ export async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
       body && typeof body === "object" && "error" in body && typeof (body as { error: unknown }).error === "string"
         ? (body as { error: string }).error
         : res.status === 409
-          ? "資料已更新或要求重複，請重新整理後再試。"
+          ? "提交遇到衝突，請查看調整記錄。"
           : "操作失敗，請稍後重試。";
-    throw new ApiError(err, res.status);
+    const details = body as { code?: unknown; existing_request?: unknown } | null;
+    const existing = details?.existing_request as Partial<ExistingChangeRequest> | undefined;
+    throw new ApiError(err, res.status, typeof details?.code === "string" ? details.code : undefined,
+      existing && typeof existing.id === "string" && typeof existing.reference === "string" ? { id: existing.id, reference: existing.reference } : undefined);
   }
   return body as T;
 }

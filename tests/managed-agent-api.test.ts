@@ -16,6 +16,8 @@ const disabled = new Set<string>();
 let rpcPayload: Record<string,unknown> | null = null;
 let rpcError: Record<string,string> | null = null;
 let rpcResult = {id:"persisted-request",reference:"REQ-000001",status:"pending",submission_replayed:false};
+let duplicateLookup: {id:string;reference:string} | null = null;
+const duplicateLookupCalls: URL[] = [];
 let roleOverride: string | undefined;
 const authRateLimited = false;
 const authUnavailable = false;
@@ -104,7 +106,10 @@ before(() => {
     }
     if(url.pathname.endsWith('/agents')) return Response.json([{name:'Fictional Agent',status:'draft',language_mode:'trilingual',config:{customer_instructions:'PRIVATE PROMPT',secret:'PRIVATE CREDENTIAL'}}]);
     if(url.pathname.endsWith('/agent_preferences')) return Response.json(null);
-    if(url.pathname.endsWith('/agent_change_requests')) return Response.json(null);
+    if(url.pathname.endsWith('/agent_change_requests')) {
+      if(token==='service-test-key'){duplicateLookupCalls.push(url);return Response.json(duplicateLookup);}
+      return Response.json(null);
+    }
     throw new Error('Unexpected test endpoint: '+url.pathname);
   };
 });
@@ -180,4 +185,21 @@ test('replayed submissions use HTTP200 and actual persisted status; terminal fee
  const response=await submitRequest(request(customerPath,'POST',payload(),cookie));assert.equal(response.status,201);
  const body=await response.json();assert.equal(body.replayed,false);assert.equal(submissionFeedback(body.request,false).terminal,false);
  assert.throws(()=>submissionFeedback({status:'invalid' as RequestStatus,reference:'REQ-1'},true));
+});
+
+test('duplicate open requests return a tenant-scoped existing-request link and a code distinct from stale versions',async()=>{
+ const cookie=cookieJar(await login('a@example.test'));const submitted=payload();
+ try{
+  duplicateLookup={id:reqId,reference:'REQ-000042'};rpcError={code:'P0001',message:'conflict: identical open request exists'};
+  const response=await submitRequest(request(customerPath,'POST',submitted,cookie));assert.equal(response.status,409);
+  const body=await response.json();assert.equal(body.code,'DUPLICATE_OPEN_REQUEST');assert.deepEqual(body.existing_request,duplicateLookup);
+  const query=duplicateLookupCalls.at(-1)!;assert.equal(query.searchParams.get('organization_id'),'eq.tenant-a');
+  assert.equal(query.searchParams.get('requested_settings'),'eq.'+JSON.stringify(submitted.preferences));
+  assert.match(query.searchParams.get('status')!,/pending.*in_progress.*needs_information/);
+  rpcError={code:'P0001',message:'conflict: active preferences changed; refresh first'};
+  const stale=await submitRequest(request(customerPath,'POST',submitted,cookie));assert.equal(stale.status,409);const staleBody=await stale.json();assert.equal(staleBody.code,'STALE_ACTIVE_PREFERENCES');assert.equal(staleBody.existing_request,undefined);
+  rpcError={code:'P0001',message:'conflict: idempotency key reused'};assert.equal((await(await submitRequest(request(customerPath,'POST',submitted,cookie))).json()).code,'IDEMPOTENCY_KEY_REUSED');
+  duplicateLookup=null;rpcError={code:'P0001',message:'conflict: identical open request exists'};
+  assert.equal((await(await submitRequest(request(customerPath,'POST',submitted,cookie))).json()).existing_request,undefined);
+ }finally{rpcError=null;duplicateLookup=null;}
 });

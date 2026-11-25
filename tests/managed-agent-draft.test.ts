@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyPreferences } from "../lib/platform/agent-preferences";
-import { initialPreferenceDraft, preferenceDraftTransition as step, reviewedPreferences, type PreferenceDraft } from "../lib/platform/agent-preference-draft";
+import { initialPreferenceDraft, isDuplicateDraft, matchesDuplicateRequest, preferenceDraftTransition as step, reviewedPreferences, type PreferenceDraft } from "../lib/platform/agent-preference-draft";
 import { ApiError, apiJson } from "../components/managed-agent/shared";
 
 const review = (state:PreferenceDraft) => step(state,{type:"review",version:state.latest!.version});
@@ -70,4 +70,36 @@ test('pre-terminal in-flight refresh cannot satisfy the required fresh snapshot'
  assert.throws(()=>review(delayed),/取得最新/);
  const fresh=step(delayed,{type:'receive',epoch:delayed.refreshEpoch,snapshot:delayed.latest!});
  assert.equal(fresh.needsRefresh,false);assert.equal(fresh.reviewRequired,true);
+});
+
+test('duplicate open request blocks identical resubmission without entering review or changing retry identity',()=>{
+ const attempted=step(edited(),{type:'prepare',key:'frozen-key'});
+ const duplicate=step(attempted,{type:'duplicate',existingRequest:{id:'own-request',reference:'REQ-42'}});
+ assert.equal(duplicate.reviewRequired,false);assert.equal(duplicate.needsRefresh,false);assert.equal(isDuplicateDraft(duplicate),true);
+ assert.deepEqual(duplicate.attempt,attempted.attempt);assert.deepEqual(duplicate.preferences,attempted.preferences);assert.equal(duplicate.notes,attempted.notes);
+ assert.throws(()=>step(duplicate,{type:'prepare',key:'must-not-loop'}),/已有相同/);
+ const changed=step(duplicate,{type:'notes',notes:'FICTIONAL different intent'});assert.equal(isDuplicateDraft(changed),false);
+ const prepared=step(changed,{type:'prepare',key:'new-intent'});assert.equal(prepared.attempt!.idempotency_key,'new-intent');
+ const resolved=step(duplicate,{type:'duplicate_resolved'});assert.equal(resolved.attempt,null);assert.equal(isDuplicateDraft(resolved),false);assert.equal(resolved.notes,duplicate.notes);
+});
+
+test('API client forwards structured duplicate metadata and stale conflict codes separately',async()=>{
+ const original=globalThis.fetch;
+ try{
+  globalThis.fetch=async()=>Response.json({error:'duplicate',code:'DUPLICATE_OPEN_REQUEST',existing_request:{id:'own-request',reference:'REQ-42'}},{status:409});
+  await assert.rejects(apiJson('https://orai.example.test/requests'),e=>e instanceof ApiError&&e.code==='DUPLICATE_OPEN_REQUEST'&&e.existingRequest?.id==='own-request');
+  globalThis.fetch=async()=>Response.json({error:'stale',code:'STALE_ACTIVE_PREFERENCES'},{status:409});
+  await assert.rejects(apiJson('https://orai.example.test/requests'),e=>e instanceof ApiError&&e.code==='STALE_ACTIVE_PREFERENCES'&&!e.existingRequest);
+ }finally{globalThis.fetch=original;}
+});
+
+test('duplicate resolution matches terminal history after a missing lookup and preserves a newer retry attempt',()=>{
+ const original=step(edited(),{type:'prepare',key:'old-duplicate'});
+ const duplicate=step(original,{type:'duplicate'});
+ const historical={id:'request-closed-before-lookup',requested_settings:original.attempt!.preferences,additional_notes:original.attempt!.additional_notes};
+ assert.equal(matchesDuplicateRequest(duplicate,historical),true);
+ assert.equal(matchesDuplicateRequest(duplicate,{...historical,additional_notes:'different request'}),false);
+ const newIntent=step(step(duplicate,{type:'notes',notes:'FICTIONAL newer intent'}),{type:'prepare',key:'new-network-retry'});
+ const resolved=step(newIntent,{type:'duplicate_resolved'});assert.deepEqual(resolved.attempt,newIntent.attempt);assert.equal(resolved.attempt!.idempotency_key,'new-network-retry');assert.equal(resolved.duplicateAttempt,null);
+ const same=step(duplicate,{type:'duplicate_resolved'});assert.equal(same.attempt,null);assert.equal(same.notes,original.notes);
 });
