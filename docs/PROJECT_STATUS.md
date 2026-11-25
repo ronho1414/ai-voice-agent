@@ -1165,3 +1165,24 @@ FAILED: no unresolved product failures. NOT VERIFIED: physical-device rendering,
 actual ElevenLabs updates, email/scheduled delivery and full backup restore remain
 outside this focused fix. No production merge/deployment/config/data changes.
 Ignored test scripts/results and local passwords were not committed.
+
+## Duplicate lock background reconciliation (PR #5 Bugbot) — 2026-11-25
+
+Code fix commit: `dcf4bbf` on `codex/managed-agent-requests` (plus handover docs `GEMINI.md` and this update).
+No SQL/RLS migration, production deployment, or merge was performed.
+
+### Implemented
+- `lib/platform/agent-preferences.ts` & `lib/platform/agent-preference-draft.ts`: added shared `isTerminalRequestStatus()`, `duplicateEpoch` tracking, `duplicate_matched` event, epoch/ID-guarded `duplicate_resolved`, and pure `reconcileDuplicateLock()` coordinator.
+- `lib/platform/managed-agent-service.ts` & `app/api/platform/customer/change-requests/lookup/route.ts`: extracted shared `findLatestMatchingRequest()` query helper and added tenant-isolated `POST /api/platform/customer/change-requests/lookup` (using `requireCustomerAuth`, `requestSupabase` RLS, `withPlatformRequest` same-origin validation, and `Cache-Control: no-store`) for rare missing-ID 409 races.
+- `components/managed-agent/CustomerAgentPanel.tsx`: reconciles active duplicate locks on 15s polling, `MANAGED_REFRESH_EVENT`, manual refresh, pagination, `patchRequest`, and 409/detail loads even when the matching request's detail panel is unselected or absent from the current paginated history page. Added sequence/epoch guards for `loadHistory`, `loadDetail`, and background reconciliation (using separate blocking-load sequence counters `historyBlockingSeqRef`/`detailBlockingSeqRef` and in-flight counts so quiet/soft polls and out-of-order user fetches never freeze `historyLoading`/`detailLoading` spinners) so delayed polling responses never unlock a newer duplicate or discard a newer attempt's retry key, while preserving unsaved drafts and stale-version recovery (`completed` refreshes active preferences).
+- `tests/managed-agent-draft.test.ts` & `tests/managed-agent-api.test.ts`: added regression tests covering all three terminal statuses (`cancelled`, `rejected`, `completed`), unselected/off-page requests, paginated history absence not falsely unlocking open/errored/missing-ID requests, delayed polling responses, retry-key preservation, stale-version recovery, and `/lookup` auth/CSRF/validation/tenant isolation/503 responses.
+- `GEMINI.md`: added concise AI handover guide referencing `AGENTS.md` and `docs/PROJECT_STATUS.md`.
+
+### Independent verification & staging check
+- Independent `orai-test-runner` on `dcf4bbf`: PASSED `test:security` 31/31, `test:webhooks` 5/5, `test:booking` 8/8, `test:managed-agent` 31/31 (75/75 total), `typecheck` (0 errors), `lint` (0 errors; 9 pre-existing warnings in unrelated voice/widget files), `next build` (29/29 routes generated; `/api/platform/customer/change-requests/lookup` built as dynamic route), `git diff --check`, and loopback HTTP smoke on port 3012 (`/`, `/beauty`, `/dashboard`, `/admin` 200; protected GET & same-origin lookup POST 401; missing/null/mismatched/foreign Origin POST lookup 403; GET lookup / customer agent PATCH 405; smoke server stopped cleanly).
+- Current staging revision check: `GET https://orai-pr4-staging.vercel.app/api/platform/customer/change-requests/lookup` with existing staging protection bypass returned `404` on 2026-11-25, confirming isolated staging remains on `560b6d8` (`dpl_AH9BpVsS1t9SYe3FwS8zK3bfCSRY`).
+- Remaining blockers / not verified:
+  - Deploying latest PR #5 code to `orai-pr4-staging` via Vercel MCP returned `403` pending user team consent (`authorize_team_access` for `team_H2vtvdKF37SmVwMwHBWn0s08`).
+  - Final `orai-test-runner` rerun on the `dcf4bbf` + `GEMINI.md` + `PROJECT_STATUS.md` working tree: PASSED all 75/75 tests, `typecheck`, `lint`, `next build` (29/29 routes), `git diff --check`, and port 3012 HTTP smoke.
+  - Live staging browser execution of `CustomerAgentPanel.tsx` background polling and hosted Supabase PostgREST JSONB matching for `/lookup` against `wnajobvcldveajtdvbwg` remain **NOT VERIFIED** until approved staging deployment.
+  - Cursor Bugbot check-run on `dcf4bbf`/final commit, email/scheduled reminders, manual ElevenLabs provider updates, PITR restore, physical mobile rendering, and branch integration of PR #4/#5 onto `origin/main` (`bb7b371`) remain pending.
