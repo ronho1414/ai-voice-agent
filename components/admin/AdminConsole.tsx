@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type DragEvent, type FormEvent } from "react";
+import { createEmbedSnippet as embedSnippet } from "@/lib/site";
 
 type DocumentItem = {
   id: string;
@@ -46,12 +47,6 @@ type ClientItem = {
 };
 
 type RouteRow = { page: string; url: string };
-
-const EMBED_ORIGIN = "https://ai-voice-agent-five-tau.vercel.app";
-
-function embedSnippet(slug: string): string {
-  return `<script src="${EMBED_ORIGIN}/embed.js?client=${slug}" defer></script>`;
-}
 
 function rowsFromMap(map: Record<string, string>): RouteRow[] {
   const rows = Object.entries(map).map(([page, url]) => ({ page, url }));

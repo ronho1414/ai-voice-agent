@@ -6,7 +6,7 @@ import { ServiceBookingLink } from "@/components/beauty/ServiceBookingLink";
 import { BEAUTY_SERVICES } from "@/lib/beauty/catalog";
 import "./beauty.css";
 
-export const metadata: Metadata = { title: "Orai Beauty｜把時間，留給自己", description: "暖意、留白與細緻護理。Orai Beauty 香港美容院示範網站，探索療程及提交預約要求。" };
+export const metadata: Metadata = { title: "Orai Beauty｜把時間，留給自己", description: "暖意、留白與細緻護理。Orai Beauty 香港美容院示範網站，探索療程及提交預約要求。", robots: { index: false, follow: false }, alternates: { canonical: "/beauty" } };
 
 export default function BeautyPage() {
   return <main className="beauty-page">
