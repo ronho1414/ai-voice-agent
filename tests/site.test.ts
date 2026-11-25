@@ -11,9 +11,9 @@ import {
   hasCompetingWidget,
   OFFICIAL_ELEVENLABS_AGENT_ID,
   OFFICIAL_WIDGET_HOST_ATTR,
-  OFFICIAL_WIDGET_LANGUAGE_FALLBACK,
   OFFICIAL_WIDGET_SCRIPT_ATTR,
   OFFICIAL_WIDGET_SCRIPT_SRC,
+  patchCantoneseLanguageEntry,
   shouldRenderOfficialWidget,
 } from '../components/voicepilot/MarketingVoiceEmbed';
 import { VOICEPILOT_SCRIPT } from '../components/voicepilot/site-script';
@@ -92,7 +92,6 @@ test('new and legacy domains retain strict same-origin mutation protection', () 
 
 test('official homepage widget renders only on root homepage and avoids legacy /orai-widget.js', () => {
   assert.equal(OFFICIAL_ELEVENLABS_AGENT_ID, 'agent_8201m7sbetj3e36s1a2nv3fgcqna');
-  assert.equal(OFFICIAL_WIDGET_LANGUAGE_FALLBACK, 'zh');
   assert.equal(OFFICIAL_WIDGET_SCRIPT_SRC, 'https://unpkg.com/@elevenlabs/convai-widget-embed');
   assert.equal(shouldRenderOfficialWidget('/'), true);
   for (const path of ['/admin', '/dashboard', '/beauty', '/pricing', '/services', '/booking', '', null, undefined]) {
@@ -101,13 +100,20 @@ test('official homepage widget renders only on root homepage and avoids legacy /
 
   const embedSource = readFileSync('components/voicepilot/MarketingVoiceEmbed.tsx', 'utf8');
   assert.ok(!embedSource.includes('/orai-widget.js'));
+  assert.ok(!embedSource.includes('override-language'));
   assert.ok(embedSource.includes('<elevenlabs-convai'));
   assert.ok(readFileSync('orai-widget.js', 'utf8').includes('elevenlabs-convai'));
   assert.ok(readFileSync('public/embed.js', 'utf8').includes('/api/client-config'));
+
+  const minified = 'var Fy={en:{name:`English`,flagCode:`us`,languageCode:`en`},zh:{name:`中文`,flagCode:`cn`,languageCode:`zh`}};';
+  const patched = patchCantoneseLanguageEntry(minified);
+  assert.ok(patched.includes('yue:{name:"Cantonese",flagCode:"hk",languageCode:"yue"},en:{name:`English`'));
+  assert.equal(patchCantoneseLanguageEntry(patched), patched);
 });
 
-test('official widget helpers prevent duplicate script injection and competing widget mounts', () => {
+test('official widget helpers prevent duplicate script injection and competing widget mounts', async () => {
   const appended: Array<Record<string, unknown>> = [];
+  let fetchCalls = 0;
   const docStub = {
     body: {
       appendChild(node: Record<string, unknown>) {
@@ -126,25 +132,39 @@ test('official widget helpers prevent duplicate script injection and competing w
         setAttribute(k: string, v: string) {
           attrs[k] = v;
         },
+        addEventListener() {},
       };
     },
     querySelector(selector: string) {
-      if (selector.includes(OFFICIAL_WIDGET_SCRIPT_SRC)) {
+      if (selector.includes(OFFICIAL_WIDGET_SCRIPT_SRC) || selector.includes(OFFICIAL_WIDGET_SCRIPT_ATTR)) {
         return appended.length > 0 ? appended[0] : null;
       }
       return null;
     },
   } as unknown as Document;
 
-  const first = ensureOfficialWidgetScript(docStub);
+  const mockWin = {
+    customElements: { get: () => undefined } as unknown as CustomElementRegistry,
+    fetch: (async () => {
+      fetchCalls += 1;
+      return new Response('var Fy={en:{name:`English`,flagCode:`us`,languageCode:`en`}};', { status: 200 });
+    }) as typeof fetch,
+  };
+
+  const [first, concurrent] = await Promise.all([
+    ensureOfficialWidgetScript(docStub, mockWin),
+    ensureOfficialWidgetScript(docStub, mockWin),
+  ]);
   assert.ok(first);
+  assert.equal(concurrent, first);
+  assert.equal(fetchCalls, 1);
   assert.equal(appended.length, 1);
-  assert.equal(appended[0].src, OFFICIAL_WIDGET_SCRIPT_SRC);
+  assert.ok(String(appended[0].src).startsWith('blob:'));
   assert.equal(appended[0].async, true);
   assert.equal(appended[0].type, 'text/javascript');
   assert.equal((appended[0].attrs as Record<string, string>)[OFFICIAL_WIDGET_SCRIPT_ATTR], 'true');
 
-  const second = ensureOfficialWidgetScript(docStub);
+  const second = await ensureOfficialWidgetScript(docStub, mockWin);
   assert.equal(second, first);
   assert.equal(appended.length, 1);
 
@@ -161,9 +181,9 @@ test('official widget helpers prevent duplicate script injection and competing w
       return null;
     },
   } as unknown as Document;
-  const skipped = ensureOfficialWidgetScript(emptyDocWithDefinedElement, {
+  const skipped = await ensureOfficialWidgetScript(emptyDocWithDefinedElement, {
     customElements: { get: (name: string) => (name === 'elevenlabs-convai' ? (class {} as CustomElementConstructor) : undefined) },
-  } as Pick<Window, 'customElements'>);
+  } as Pick<Window, 'customElements' | 'fetch'>);
   assert.equal(skipped, null);
 
   const ownHost = { contains: (el: unknown) => el === ownWidget } as unknown as Element;
