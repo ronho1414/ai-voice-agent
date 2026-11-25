@@ -2,8 +2,17 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ChangeRequest, RequestEvent } from "@/lib/platform/agent-preferences";
-import { submissionFeedback, visiblePreferenceKeys } from "@/lib/platform/agent-preferences";
-import { initialPreferenceDraft, isDuplicateDraft, matchesDuplicateRequest, preferenceDraftTransition, reviewedPreferences } from "@/lib/platform/agent-preference-draft";
+import { isTerminalRequestStatus, submissionFeedback, visiblePreferenceKeys } from "@/lib/platform/agent-preferences";
+import {
+  initialPreferenceDraft,
+  isDuplicateDraft,
+  matchesDuplicateRequest,
+  preferenceDraftTransition,
+  reconcileDuplicateLock,
+  reviewedPreferences,
+  type DuplicateEvent,
+  type DuplicateLookupResponse,
+} from "@/lib/platform/agent-preference-draft";
 import { PreferenceFields, PreferenceReadonly } from "./PreferenceFields";
 import {
   MANAGED_REFRESH_EVENT,
@@ -61,6 +70,9 @@ type CustomerAgentPanelProps = {
 export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }: CustomerAgentPanelProps) {
   const confirmTitleId = useId();
   const submitLock = useRef(false);
+  const historySeqRef = useRef(0);
+  const detailSeqRef = useRef(0);
+  const activeDetailIdRef = useRef<string | null>(null);
   const [form, setForm] = useState(initialPreferenceDraft);
   const formRef = useRef(form);
   const changeForm = useCallback((event: Parameters<typeof preferenceDraftTransition>[1]) => {
@@ -69,6 +81,14 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
     setForm(next);
     return next;
   }, []);
+  const applyDuplicateEvent = useCallback((event: Exclude<DuplicateEvent, { type: "duplicate" }>) => {
+    const hadDuplicate = Boolean(formRef.current.duplicateAttempt);
+    const next = changeForm(event);
+    if (hadDuplicate && !next.duplicateAttempt) {
+      setFormError((prev) => (prev && /已有相同/.test(prev) ? "" : prev));
+    }
+    return next;
+  }, [changeForm]);
 
   const [agentLoading, setAgentLoading] = useState(true);
   const [agentError, setAgentError] = useState("");
@@ -118,48 +138,116 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
     }
   }, [applyAgentPayload, changeForm]);
 
-  const loadHistory = useCallback(async (nextPage: number, opts?: { quiet?: boolean }) => {
+  const fetchRequestDetail = useCallback((id: string) => {
+    return apiJson<DetailResponse>(`/api/platform/customer/change-requests?id=${encodeURIComponent(id)}`);
+  }, []);
+
+  const lookupDuplicateStatus = useCallback((attempt: { preferences: Preferences; additional_notes: string }) => {
+    return apiJson<DuplicateLookupResponse>("/api/platform/customer/change-requests/lookup", {
+      method: "POST",
+      body: JSON.stringify(attempt),
+    });
+  }, []);
+
+  const reconcileDuplicate = useCallback(async (
+    duplicateEpoch: number,
+    historyRows?: ChangeRequest[] | null,
+    detailRequest?: ChangeRequest | null,
+  ) => {
+    if (!formRef.current.duplicateAttempt || formRef.current.duplicateEpoch !== duplicateEpoch) return;
+    const res = await reconcileDuplicateLock({
+      epoch: duplicateEpoch,
+      getState: () => formRef.current,
+      dispatch: applyDuplicateEvent,
+      fetchById: fetchRequestDetail,
+      lookupByAttempt: lookupDuplicateStatus,
+      historyRows,
+      detailResult: detailRequest,
+    });
+    if (res.outcome === "resolved" && res.shouldRefreshAgent) {
+      void loadAgent();
+    }
+  }, [applyDuplicateEvent, fetchRequestDetail, loadAgent, lookupDuplicateStatus]);
+
+  const loadHistory = useCallback(async (nextPage: number, opts?: { quiet?: boolean }): Promise<ChangeRequest[] | null> => {
+    const seq = ++historySeqRef.current;
     if (!opts?.quiet) setHistoryLoading(true);
     try {
       const body = await apiJson<ListResponse>(`/api/platform/customer/change-requests?page=${nextPage}`);
-      setRequests(Array.isArray(body.requests) ? body.requests : []);
+      if (seq !== historySeqRef.current) return null;
+      const rows = Array.isArray(body.requests) ? body.requests : [];
+      setRequests(rows);
       setTotal(typeof body.total === "number" ? body.total : 0);
       setPage(typeof body.page === "number" ? body.page : nextPage);
       setHistoryError("");
+      return rows;
     } catch (err) {
-      setHistoryError(err instanceof Error ? err.message : "無法載入調整紀錄");
+      if (seq === historySeqRef.current) {
+        setHistoryError(err instanceof Error ? err.message : "無法載入調整紀錄");
+      }
+      return null;
     } finally {
-      if (!opts?.quiet) setHistoryLoading(false);
+      if (!opts?.quiet && seq === historySeqRef.current) setHistoryLoading(false);
     }
   }, []);
 
-  const loadDetail = useCallback(async (id: string, opts?: { soft?: boolean }) => {
+  const loadDetail = useCallback(async (id: string, opts?: { soft?: boolean }): Promise<ChangeRequest | null> => {
     const soft = opts?.soft === true;
-    setSelectedId(id);
+    const detailSeq = ++detailSeqRef.current;
+    const duplicateEpoch = formRef.current.duplicateEpoch;
     if (!soft) {
+      activeDetailIdRef.current = id;
+      setSelectedId(id);
       setDetailLoading(true);
       setDetailError("");
       setInfoMessage("");
     }
     try {
-      const body = await apiJson<DetailResponse>(`/api/platform/customer/change-requests?id=${encodeURIComponent(id)}`);
-      setDetail(body.request);
-      if (matchesDuplicateRequest(formRef.current, body.request) && ["cancelled", "rejected", "completed"].includes(body.request.status)) {
-        changeForm({ type: "duplicate_resolved" });
-        setFormError("");
+      const body = await fetchRequestDetail(id);
+      if (matchesDuplicateRequest(formRef.current, body.request) && isTerminalRequestStatus(body.request.status)) {
+        if (formRef.current.duplicateRequest) {
+          applyDuplicateEvent({ type: "duplicate_resolved", epoch: duplicateEpoch, requestId: body.request.id });
+          if (body.request.status === "completed") void loadAgent();
+        } else {
+          void reconcileDuplicate(duplicateEpoch, null, body.request);
+        }
       }
-      setEvents(Array.isArray(body.events) ? body.events : []);
-      setDetailError("");
+      if (detailSeq === detailSeqRef.current && activeDetailIdRef.current === id) {
+        setDetail(body.request);
+        setEvents(Array.isArray(body.events) ? body.events : []);
+        setDetailError("");
+      }
+      return body.request;
     } catch (err) {
-      if (!soft) {
-        setDetail(null);
-        setEvents([]);
+      if (detailSeq === detailSeqRef.current && activeDetailIdRef.current === id) {
+        if (!soft) {
+          setDetail(null);
+          setEvents([]);
+        }
+        setDetailError(err instanceof Error ? err.message : "無法載入要求詳情");
       }
-      setDetailError(err instanceof Error ? err.message : "無法載入要求詳情");
+      return null;
     } finally {
-      if (!soft) setDetailLoading(false);
+      if (!soft && detailSeq === detailSeqRef.current) setDetailLoading(false);
     }
-  }, [changeForm]);
+  }, [applyDuplicateEvent, fetchRequestDetail, loadAgent, reconcileDuplicate]);
+
+  const refreshAndReconcile = useCallback(async (opts?: { quietHistory?: boolean }) => {
+    const duplicateEpoch = formRef.current.duplicateEpoch;
+    const currentSelected = activeDetailIdRef.current;
+    void loadAgent();
+    const [detailRequest, historyRows] = await Promise.all([
+      currentSelected ? loadDetail(currentSelected, { soft: true }) : Promise.resolve(null),
+      loadHistory(page, { quiet: opts?.quietHistory }),
+    ]);
+    await reconcileDuplicate(duplicateEpoch, historyRows, detailRequest);
+  }, [loadAgent, loadDetail, loadHistory, page, reconcileDuplicate]);
+
+  const changeHistoryPage = useCallback(async (nextPage: number) => {
+    const duplicateEpoch = formRef.current.duplicateEpoch;
+    const historyRows = await loadHistory(nextPage);
+    await reconcileDuplicate(duplicateEpoch, historyRows);
+  }, [loadHistory, reconcileDuplicate]);
 
   useEffect(() => {
     void loadAgent();
@@ -168,21 +256,17 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      void loadAgent();
-      void loadHistory(page, { quiet: true });
-      if (selectedId) void loadDetail(selectedId, { soft: true });
+      void refreshAndReconcile({ quietHistory: true });
     }, 15_000);
     const onRefresh = () => {
-      void loadAgent();
-      void loadHistory(page, { quiet: true });
-      if (selectedId) void loadDetail(selectedId, { soft: true });
+      void refreshAndReconcile({ quietHistory: true });
     };
     window.addEventListener(MANAGED_REFRESH_EVENT, onRefresh);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener(MANAGED_REFRESH_EVENT, onRefresh);
     };
-  }, [loadAgent, loadHistory, loadDetail, page, selectedId]);
+  }, [refreshAndReconcile]);
 
   useEffect(() => {
     if (!initialRequestId) return;
@@ -259,8 +343,11 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
       if (err instanceof ApiError && err.status === 409) {
         setConfirmOpen(false);
         if (err.code === "DUPLICATE_OPEN_REQUEST") {
-          changeForm({ type: "duplicate", existingRequest: err.existingRequest });
-          await loadHistory(1);
+          const next = changeForm({ type: "duplicate", existingRequest: err.existingRequest });
+          setFormError(err.message);
+          const historyRows = await loadHistory(1);
+          await reconcileDuplicate(next.duplicateEpoch, historyRows);
+          return;
         } else if (err.code === "STALE_ACTIVE_PREFERENCES") {
           changeForm({ type: "conflict" });
           await loadAgent();
@@ -289,9 +376,11 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
         }),
       });
       dispatchManagedRefresh();
-      await loadDetail(detail.id);
-      await loadHistory(page);
+      const duplicateEpoch = formRef.current.duplicateEpoch;
+      const updated = await loadDetail(detail.id);
+      const historyRows = await loadHistory(page);
       await loadAgent();
+      await reconcileDuplicate(duplicateEpoch, historyRows, updated);
     } catch (err) {
       setDetailError(err instanceof Error ? err.message : "操作失敗");
     } finally {
@@ -461,7 +550,7 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
           </div>
           <button
             type="button"
-            onClick={() => void loadHistory(page)}
+            onClick={() => void refreshAndReconcile()}
             className="rounded-xl border border-[#E4E4E7] bg-white px-3 py-2 text-[11px] font-bold text-[#52525B] hover:bg-[#F4F4F5]"
           >
             重新整理
@@ -512,7 +601,7 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
             <button
               type="button"
               disabled={page <= 1 || historyLoading}
-              onClick={() => void loadHistory(page - 1)}
+              onClick={() => void changeHistoryPage(page - 1)}
               className="rounded-xl border border-[#E4E4E7] bg-white px-3 py-2 font-bold disabled:opacity-40"
             >
               上一頁
@@ -523,7 +612,7 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
             <button
               type="button"
               disabled={page >= totalPages || historyLoading}
-              onClick={() => void loadHistory(page + 1)}
+              onClick={() => void changeHistoryPage(page + 1)}
               className="rounded-xl border border-[#E4E4E7] bg-white px-3 py-2 font-bold disabled:opacity-40"
             >
               下一頁
@@ -542,6 +631,8 @@ export function CustomerAgentPanel({ initialRequestId = null, onRequestHandled }
             <button
               type="button"
               onClick={() => {
+                activeDetailIdRef.current = null;
+                detailSeqRef.current += 1;
                 setSelectedId(null);
                 setDetail(null);
                 setEvents([]);

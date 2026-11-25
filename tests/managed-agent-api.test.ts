@@ -18,6 +18,8 @@ let rpcError: Record<string,string> | null = null;
 let rpcResult = {id:"persisted-request",reference:"REQ-000001",status:"pending",submission_replayed:false};
 let duplicateLookup: {id:string;reference:string} | null = null;
 const duplicateLookupCalls: URL[] = [];
+const customerLookupCalls: { token: string; url: URL }[] = [];
+let customerLookupResponses: ({ id: string; reference: string; status: string } | null | { error: string })[] = [];
 let roleOverride: string | undefined;
 const authRateLimited = false;
 const authUnavailable = false;
@@ -108,6 +110,12 @@ before(() => {
     if(url.pathname.endsWith('/agent_preferences')) return Response.json(null);
     if(url.pathname.endsWith('/agent_change_requests')) {
       if(token==='service-test-key'){duplicateLookupCalls.push(url);return Response.json(duplicateLookup);}
+      customerLookupCalls.push({ token, url });
+      if (customerLookupResponses.length > 0) {
+        const next = customerLookupResponses.shift()!;
+        if (next && 'error' in next) return Response.json({ message: next.error }, { status: 500 });
+        return Response.json(next);
+      }
       return Response.json(null);
     }
     throw new Error('Unexpected test endpoint: '+url.pathname);
@@ -122,6 +130,7 @@ after(() => {
 
 import { GET as agentInfo } from '../app/api/platform/customer/agent/route';
 import { POST as submitRequest, PATCH as changeRequest, GET as getRequests } from '../app/api/platform/customer/change-requests/route';
+import { POST as lookupRequest } from '../app/api/platform/customer/change-requests/lookup/route';
 import { PATCH as adminRequest } from '../app/api/platform/admin/change-requests/route';
 import { emptyPreferences } from '../lib/platform/agent-preferences';
 import { submissionFeedback, type RequestStatus } from '../lib/platform/agent-preferences';
@@ -202,4 +211,51 @@ test('duplicate open requests return a tenant-scoped existing-request link and a
   duplicateLookup=null;rpcError={code:'P0001',message:'conflict: identical open request exists'};
   assert.equal((await(await submitRequest(request(customerPath,'POST',submitted,cookie))).json()).existing_request,undefined);
  }finally{rpcError=null;duplicateLookup=null;}
+});
+
+test('authorized duplicate status lookup enforces auth, same-origin, validation and tenant isolation across open/terminal states', async () => {
+  const lookupPath = '/api/platform/customer/change-requests/lookup';
+  const bodyPayload = { preferences: { ...emptyPreferences, voice_gender: 'male' }, additional_notes: ' FICTIONAL check ' };
+  assert.equal((await lookupRequest(request(lookupPath, 'POST', bodyPayload))).status, 401);
+
+  const cookieA = cookieJar(await login('a@example.test'));
+  const cookieB = cookieJar(await login('b@example.test'));
+  const cookieAdmin = cookieJar(await login('admin@example.test', 'super_admin'));
+
+  assert.equal((await lookupRequest(request(lookupPath, 'POST', bodyPayload, cookieA, 'https://evil.example'))).status, 403);
+  assert.equal((await lookupRequest(request(lookupPath, 'POST', bodyPayload, cookieAdmin))).status, 403);
+  assert.equal((await lookupRequest(request(lookupPath, 'POST', { ...bodyPayload, organization_id: 'tenant-b' }, cookieA))).status, 400);
+  assert.equal((await lookupRequest(request(lookupPath, 'POST', { preferences: { ...emptyPreferences, voice_gender: 'invalid' } }, cookieA))).status, 400);
+
+  try {
+    customerLookupCalls.length = 0;
+    customerLookupResponses = [{ id: reqId, reference: 'REQ-000042', status: 'in_progress' }];
+    const openRes = await lookupRequest(request(lookupPath, 'POST', bodyPayload, cookieA));
+    assert.equal(openRes.status, 200);
+    assert.match(openRes.headers.get('cache-control') || '', /no-store/);
+    assert.deepEqual(await openRes.json(), { open: true, request: { id: reqId, reference: 'REQ-000042', status: 'in_progress' } });
+    assert.equal(customerLookupCalls.length, 1);
+    assert.equal(customerLookupCalls[0].url.searchParams.get('organization_id'), 'eq.tenant-a');
+    assert.equal(customerLookupCalls[0].url.searchParams.get('additional_notes'), 'eq.FICTIONAL check');
+    assert.notEqual(customerLookupCalls[0].token, 'service-test-key');
+
+    for (const terminalStatus of ['cancelled', 'rejected', 'completed']) {
+      customerLookupCalls.length = 0;
+      customerLookupResponses = [null, { id: reqId, reference: 'REQ-000042', status: terminalStatus }];
+      const closedRes = await lookupRequest(request(lookupPath, 'POST', bodyPayload, cookieB));
+      assert.equal(closedRes.status, 200);
+      assert.deepEqual(await closedRes.json(), { open: false, request: { id: reqId, reference: 'REQ-000042', status: terminalStatus } });
+      assert.equal(customerLookupCalls.length, 2);
+      assert.equal(customerLookupCalls[0].url.searchParams.get('organization_id'), 'eq.tenant-b');
+      assert.equal(customerLookupCalls[1].url.searchParams.get('organization_id'), 'eq.tenant-b');
+    }
+
+    customerLookupResponses = [{ error: 'sensitive postgres detail' }];
+    const errRes = await lookupRequest(request(lookupPath, 'POST', bodyPayload, cookieA));
+    assert.equal(errRes.status, 503);
+    assert.ok(!(await errRes.text()).includes('sensitive'));
+  } finally {
+    customerLookupResponses = [];
+    customerLookupCalls.length = 0;
+  }
 });

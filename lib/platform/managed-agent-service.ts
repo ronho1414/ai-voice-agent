@@ -1,8 +1,33 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { PlatformSession } from "./types";
-import { emptyPreferences, parsePreferences, statusLabels, type ChangeRequest } from "./agent-preferences";
+import { emptyPreferences, parsePreferences, statusLabels, terminalRequestStatuses, type ChangeRequest } from "./agent-preferences";
 import { requestSupabase } from "./supabase-auth";
 import { managedConflictCode, type ExistingChangeRequest, type ManagedConflictCode } from "./managed-agent-errors";
+
+const OPEN_REQUEST_STATUSES = ["pending", "in_progress", "needs_information"] as const;
+
+async function findLatestMatchingRequest(
+  db: SupabaseClient,
+  organizationId: string,
+  preferences: unknown,
+  additionalNotes: string,
+  statuses: readonly string[],
+  columns: string,
+  errorMessage: string,
+) {
+  const { data, error } = await db
+    .from("agent_change_requests")
+    .select(columns)
+    .eq("organization_id", organizationId)
+    .eq("requested_settings", JSON.stringify(preferences))
+    .eq("additional_notes", additionalNotes)
+    .in("status", [...statuses])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new ManagedError(errorMessage, 503);
+  return data;
+}
 
 export class ManagedError extends Error { constructor(message: string, public status = 400, public code?: ManagedConflictCode, public existingRequest?: ExistingChangeRequest) { super(message); } }
 export function serviceDatabase() {
@@ -53,11 +78,15 @@ export async function command(session: PlatformSession, operation: string, body:
     if (code === "DUPLICATE_OPEN_REQUEST") {
       // Tenant comes exclusively from the verified session. Never return a
       // request ID supplied by the client or untrusted exception text.
-      const { data: existing, error: lookupError } = await serviceDatabase().from("agent_change_requests")
-        .select("id,reference").eq("organization_id", session.organizationId!)
-        .eq("requested_settings", JSON.stringify(payload.preferences)).eq("additional_notes", payload.additional_notes)
-        .in("status", ["pending", "in_progress", "needs_information"]).order("created_at", { ascending: false }).limit(1).maybeSingle();
-      if (lookupError) throw new ManagedError("未能載入現有要求，請稍後重試。", 503);
+      const existing = await findLatestMatchingRequest(
+        serviceDatabase(),
+        session.organizationId!,
+        payload.preferences,
+        String(payload.additional_notes),
+        OPEN_REQUEST_STATUSES,
+        "id,reference",
+        "未能載入現有要求，請稍後重試。",
+      ) as ExistingChangeRequest | null;
       throw new ManagedError("已有相同的調整要求正在處理中，毋須重複提交。你的草稿已保留。", 409, code, existing ?? undefined);
     }
     if (code) throw new ManagedError(code === "IDEMPOTENCY_KEY_REUSED" ? "此提交編號已用於另一要求，請修改內容後再確認提交。" : "資料已更新，請覆核最新設定或查看調整記錄。", 409, code);
@@ -72,6 +101,32 @@ export async function activePreferences(request: Request, org: string) {
   const { data, error } = await requestSupabase(request).from("agent_preferences").select("settings,version,curated_voice_id").eq("organization_id", org).maybeSingle();
   if (error) throw new ManagedError("未能載入生效偏好，請稍後重試。", 503);
   return data ?? { settings: emptyPreferences, version: 0, curated_voice_id: null };
+}
+export async function lookupDuplicateChangeRequest(request: Request, session: PlatformSession, body: Record<string, unknown>) {
+  keys(body, ["preferences", "additional_notes"]);
+  const preferences = validatedPreferences(body.preferences);
+  const notes = text(body.additional_notes ?? "");
+  const db = requestSupabase(request);
+  const openMatch = await findLatestMatchingRequest(
+    db,
+    session.organizationId!,
+    preferences,
+    notes,
+    OPEN_REQUEST_STATUSES,
+    "id,reference,status",
+    "未能確認要求狀態，請稍後重試。",
+  );
+  if (openMatch) return { open: true, request: openMatch };
+  const closedMatch = await findLatestMatchingRequest(
+    db,
+    session.organizationId!,
+    preferences,
+    notes,
+    terminalRequestStatuses,
+    "id,reference,status",
+    "未能確認要求狀態，請稍後重試。",
+  );
+  return { open: false, request: closedMatch ?? null };
 }
 export async function listOrDetail(request: Request, session: PlatformSession, admin: boolean) {
   const db = requestSupabase(request), url = new URL(request.url), id = url.searchParams.get("id");

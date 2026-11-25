@@ -1,4 +1,4 @@
-import { changedFields, emptyPreferences, type Preferences } from "./agent-preferences";
+import { changedFields, emptyPreferences, isTerminalRequestStatus, type Preferences, type RequestStatus } from "./agent-preferences";
 import type { ExistingChangeRequest } from "./managed-agent-errors";
 
 export type ActivePreferenceSnapshot = { settings: Preferences; version: number };
@@ -13,10 +13,24 @@ export type PreferenceDraft = {
   needsRefresh: boolean;
   attempt: SubmissionAttempt | null;
   refreshEpoch: number;
+  duplicateEpoch: number;
   duplicateAttempt: SubmissionAttempt | null;
   duplicateRequest: ExistingChangeRequest | null;
 };
-export const initialPreferenceDraft: PreferenceDraft = { baseline: null, latest: null, preferences: emptyPreferences, notes: "", dirty: false, reviewRequired: false, needsRefresh: false, attempt: null, refreshEpoch: 0, duplicateAttempt: null, duplicateRequest: null };
+export const initialPreferenceDraft: PreferenceDraft = {
+  baseline: null,
+  latest: null,
+  preferences: emptyPreferences,
+  notes: "",
+  dirty: false,
+  reviewRequired: false,
+  needsRefresh: false,
+  attempt: null,
+  refreshEpoch: 0,
+  duplicateEpoch: 0,
+  duplicateAttempt: null,
+  duplicateRequest: null,
+};
 export function isDuplicateDraft(state: PreferenceDraft): boolean {
   return Boolean(state.duplicateAttempt && state.duplicateAttempt.additional_notes === state.notes.trim() && !changedFields(state.duplicateAttempt.preferences, state.preferences).length);
 }
@@ -45,7 +59,10 @@ type DraftEvent =
   | { type: "conflict" | "terminal" | "refresh_failed" | "accepted" }
   | { type: "review"; version: number }
   | { type: "prepare"; key: string };
-type DuplicateEvent = { type: "duplicate"; existingRequest?: ExistingChangeRequest } | { type: "duplicate_resolved" };
+export type DuplicateEvent =
+  | { type: "duplicate"; existingRequest?: ExistingChangeRequest }
+  | { type: "duplicate_matched"; epoch: number; existingRequest: ExistingChangeRequest }
+  | { type: "duplicate_resolved"; epoch?: number; requestId?: string };
 
 export function preferenceDraftTransition(state: PreferenceDraft, event: DraftEvent | DuplicateEvent): PreferenceDraft {
   switch (event.type) {
@@ -54,8 +71,15 @@ export function preferenceDraftTransition(state: PreferenceDraft, event: DraftEv
       if (event.epoch !== state.refreshEpoch) return state;
       if (state.latest && snapshot.version < state.latest.version) return state;
       const latest = { ...snapshot, settings: { ...snapshot.settings } };
-      if (!state.dirty && !state.attempt && !state.reviewRequired) {
-        return { ...initialPreferenceDraft, refreshEpoch: state.refreshEpoch, latest, baseline: latest, preferences: { ...latest.settings } };
+      if (!state.dirty && !state.attempt && !state.reviewRequired && !state.duplicateAttempt) {
+        return {
+          ...initialPreferenceDraft,
+          refreshEpoch: state.refreshEpoch,
+          duplicateEpoch: state.duplicateEpoch,
+          latest,
+          baseline: latest,
+          preferences: { ...latest.settings },
+        };
       }
       return { ...state, latest, needsRefresh: false, reviewRequired: state.reviewRequired || snapshot.version !== state.baseline?.version };
     }
@@ -64,9 +88,22 @@ export function preferenceDraftTransition(state: PreferenceDraft, event: DraftEv
     case "conflict":
     case "terminal": return { ...state, dirty: true, reviewRequired: true, needsRefresh: true, refreshEpoch: state.refreshEpoch + 1 };
     case "refresh_failed": return { ...state, needsRefresh: state.needsRefresh || state.reviewRequired };
-    case "duplicate": return { ...state, duplicateAttempt: state.attempt, duplicateRequest: event.existingRequest ?? null };
-    case "duplicate_resolved": return { ...state, duplicateAttempt: null, duplicateRequest: null,
-      attempt: state.attempt?.idempotency_key === state.duplicateAttempt?.idempotency_key ? null : state.attempt };
+    case "duplicate":
+      return { ...state, duplicateAttempt: state.attempt, duplicateRequest: event.existingRequest ?? null, duplicateEpoch: state.duplicateEpoch + 1 };
+    case "duplicate_matched":
+      if (!state.duplicateAttempt || event.epoch !== state.duplicateEpoch) return state;
+      return { ...state, duplicateRequest: event.existingRequest };
+    case "duplicate_resolved":
+      if (!state.duplicateAttempt) return state;
+      if (event.epoch !== undefined && event.epoch !== state.duplicateEpoch) return state;
+      if (event.requestId && state.duplicateRequest && event.requestId !== state.duplicateRequest.id) return state;
+      return {
+        ...state,
+        duplicateAttempt: null,
+        duplicateRequest: null,
+        duplicateEpoch: state.duplicateEpoch + 1,
+        attempt: state.attempt?.idempotency_key === state.duplicateAttempt?.idempotency_key ? null : state.attempt,
+      };
     case "review": {
       if (!state.latest || state.needsRefresh) throw new Error("請先取得最新生效設定，再覆核草稿。");
       if (state.latest.version !== event.version) throw new Error("最新設定再次更新，請重新覆核畫面中的差異。");
@@ -81,6 +118,94 @@ export function preferenceDraftTransition(state: PreferenceDraft, event: DraftEv
       const same = previous && previous.base_version === payload.base_version && previous.additional_notes === payload.additional_notes && !changedFields(previous.preferences, payload.preferences).length;
       return { ...state, attempt: same ? previous : { ...payload, idempotency_key: event.key } };
     }
-    case "accepted": return { ...initialPreferenceDraft, refreshEpoch: state.refreshEpoch + 1, baseline: state.latest, latest: state.latest, preferences: { ...(state.latest?.settings ?? emptyPreferences) } };
+    case "accepted":
+      return {
+        ...initialPreferenceDraft,
+        refreshEpoch: state.refreshEpoch + 1,
+        duplicateEpoch: state.duplicateEpoch + 1,
+        baseline: state.latest,
+        latest: state.latest,
+        preferences: { ...(state.latest?.settings ?? emptyPreferences) },
+      };
+  }
+}
+
+export type DuplicateStatusRecord = { id: string; reference: string; status: RequestStatus };
+
+export type DuplicateLookupResponse = { open: boolean; request: DuplicateStatusRecord | null };
+
+export type ReconcileDuplicateResult =
+  | { outcome: "noop" }
+  | { outcome: "still_open"; status: RequestStatus; request?: ExistingChangeRequest }
+  | { outcome: "resolved"; status?: RequestStatus; requestId?: string; shouldRefreshAgent: boolean }
+  | { outcome: "error" };
+
+/**
+ * Reconciles an active duplicate lock even when its detail panel is unselected
+ * or absent from the visible paginated history page.
+ */
+export async function reconcileDuplicateLock(params: {
+  epoch: number;
+  getState: () => PreferenceDraft;
+  dispatch: (event: Exclude<DuplicateEvent, { type: "duplicate" }>) => void;
+  fetchById: (id: string) => Promise<{ request: DuplicateStatusRecord }>;
+  lookupByAttempt: (attempt: Pick<SubmissionAttempt, "preferences" | "additional_notes">) => Promise<DuplicateLookupResponse>;
+  historyRows?: readonly DuplicateStatusRecord[] | null;
+  detailResult?: DuplicateStatusRecord | null;
+}): Promise<ReconcileDuplicateResult> {
+  const start = params.getState();
+  if (!start.duplicateAttempt || start.duplicateEpoch !== params.epoch) return { outcome: "noop" };
+
+  if (start.duplicateRequest) {
+    const targetId = start.duplicateRequest.id;
+    const known = params.detailResult?.id === targetId
+      ? params.detailResult
+      : params.historyRows?.find(row => row.id === targetId);
+    if (known) {
+      if (isTerminalRequestStatus(known.status)) {
+        params.dispatch({ type: "duplicate_resolved", epoch: params.epoch, requestId: targetId });
+        return { outcome: "resolved", status: known.status, requestId: targetId, shouldRefreshAgent: known.status === "completed" };
+      }
+      return { outcome: "still_open", status: known.status };
+    }
+    try {
+      const { request } = await params.fetchById(targetId);
+      const current = params.getState();
+      if (!current.duplicateAttempt || current.duplicateEpoch !== params.epoch || current.duplicateRequest?.id !== targetId) {
+        return { outcome: "noop" };
+      }
+      if (isTerminalRequestStatus(request.status)) {
+        params.dispatch({ type: "duplicate_resolved", epoch: params.epoch, requestId: targetId });
+        return { outcome: "resolved", status: request.status, requestId: targetId, shouldRefreshAgent: request.status === "completed" };
+      }
+      return { outcome: "still_open", status: request.status };
+    } catch {
+      return { outcome: "error" };
+    }
+  }
+
+  try {
+    const result = await params.lookupByAttempt({
+      preferences: start.duplicateAttempt.preferences,
+      additional_notes: start.duplicateAttempt.additional_notes,
+    });
+    const current = params.getState();
+    if (!current.duplicateAttempt || current.duplicateEpoch !== params.epoch || current.duplicateRequest !== null) {
+      return { outcome: "noop" };
+    }
+    if (result.open) {
+      const matched = result.request ? { id: result.request.id, reference: result.request.reference } : undefined;
+      if (matched) params.dispatch({ type: "duplicate_matched", epoch: params.epoch, existingRequest: matched });
+      return { outcome: "still_open", status: result.request?.status ?? "pending", ...(matched ? { request: matched } : {}) };
+    }
+    params.dispatch({ type: "duplicate_resolved", epoch: params.epoch });
+    return {
+      outcome: "resolved",
+      status: result.request?.status,
+      requestId: result.request?.id,
+      shouldRefreshAgent: !result.request || result.request.status === "completed",
+    };
+  } catch {
+    return { outcome: "error" };
   }
 }

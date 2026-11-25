@@ -1,7 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { emptyPreferences } from "../lib/platform/agent-preferences";
-import { initialPreferenceDraft, isDuplicateDraft, matchesDuplicateRequest, preferenceDraftTransition as step, reviewedPreferences, type PreferenceDraft } from "../lib/platform/agent-preference-draft";
+import { emptyPreferences, type RequestStatus } from "../lib/platform/agent-preferences";
+import {
+  initialPreferenceDraft,
+  isDuplicateDraft,
+  matchesDuplicateRequest,
+  preferenceDraftTransition as step,
+  reconcileDuplicateLock,
+  reviewedPreferences,
+  type DuplicateStatusRecord,
+  type PreferenceDraft,
+} from "../lib/platform/agent-preference-draft";
 import { ApiError, apiJson } from "../components/managed-agent/shared";
 
 const review = (state:PreferenceDraft) => step(state,{type:"review",version:state.latest!.version});
@@ -102,4 +111,246 @@ test('duplicate resolution matches terminal history after a missing lookup and p
  const newIntent=step(step(duplicate,{type:'notes',notes:'FICTIONAL newer intent'}),{type:'prepare',key:'new-network-retry'});
  const resolved=step(newIntent,{type:'duplicate_resolved'});assert.deepEqual(resolved.attempt,newIntent.attempt);assert.equal(resolved.attempt!.idempotency_key,'new-network-retry');assert.equal(resolved.duplicateAttempt,null);
  const same=step(duplicate,{type:'duplicate_resolved'});assert.equal(same.attempt,null);assert.equal(same.notes,original.notes);
+});
+
+test("background reconciliation unlocks closed duplicate across cancelled, rejected and completed even when unselected and off-page", async () => {
+  for (const status of ["cancelled", "rejected", "completed"] as const) {
+    let state = step(step(edited(), { type: "prepare", key: `dup-key-${status}` }), {
+      type: "duplicate",
+      existingRequest: { id: `req-${status}`, reference: `REQ-${status}` },
+    });
+    // Customer edits temporarily without submitting, while detail panel is closed/unselected.
+    state = step(state, { type: "notes", notes: "FICTIONAL temporary note" });
+    assert.equal(isDuplicateDraft(state), false);
+    assert.ok(state.duplicateAttempt);
+
+    let fetchCalls = 0;
+    const otherPageHistory: DuplicateStatusRecord[] = [{ id: "unrelated-req", reference: "REQ-999", status: "pending" }];
+    const result = await reconcileDuplicateLock({
+      epoch: state.duplicateEpoch,
+      getState: () => state,
+      dispatch: (event) => {
+        state = step(state, event);
+      },
+      fetchById: async (id) => {
+        fetchCalls += 1;
+        assert.equal(id, `req-${status}`);
+        return { request: { id, reference: `REQ-${status}`, status } };
+      },
+      lookupByAttempt: async () => {
+        throw new Error("lookupByAttempt should not run when ID is known");
+      },
+      historyRows: otherPageHistory,
+      detailResult: { id: "different-selected-row", reference: "REQ-OTHER", status: "pending" },
+    });
+
+    assert.equal(fetchCalls, 1);
+    assert.equal(result.outcome, "resolved");
+    assert.equal(result.shouldRefreshAgent, status === "completed");
+    assert.equal(state.duplicateAttempt, null);
+    assert.equal(state.duplicateRequest, null);
+    assert.equal(state.attempt, null);
+    assert.equal(state.notes, "FICTIONAL temporary note");
+
+    // Reverting temporary edit back to original draft must NOT re-lock.
+    state = step(state, { type: "notes", notes: "FICTIONAL keep this note" });
+    assert.equal(isDuplicateDraft(state), false);
+    assert.deepEqual(state.preferences, edited().preferences);
+
+    if (status === "completed") {
+      // Completed request advances active baseline and preserves unsaved draft via stale-version review.
+      state = step(state, {
+        type: "receive",
+        epoch: state.refreshEpoch,
+        snapshot: { settings: { ...emptyPreferences, voice_gender: "male" }, version: 2 },
+      });
+      assert.equal(state.reviewRequired, true);
+      assert.equal(state.notes, "FICTIONAL keep this note");
+      const ready = step(review(state), { type: "prepare", key: "fresh-after-completed-unlock" });
+      assert.equal(ready.attempt!.base_version, 2);
+      assert.equal(ready.attempt!.idempotency_key, "fresh-after-completed-unlock");
+    } else {
+      const ready = step(state, { type: "prepare", key: `resubmit-${status}` });
+      assert.equal(ready.attempt!.idempotency_key, `resubmit-${status}`);
+    }
+  }
+});
+
+test("absence from paginated history never releases an open or unverified duplicate lock", async () => {
+  for (const openStatus of ["pending", "in_progress", "needs_information"] as RequestStatus[]) {
+    let state = step(step(edited(), { type: "prepare", key: `open-${openStatus}` }), {
+      type: "duplicate",
+      existingRequest: { id: "req-offpage", reference: "REQ-OFFPAGE" },
+    });
+    const res = await reconcileDuplicateLock({
+      epoch: state.duplicateEpoch,
+      getState: () => state,
+      dispatch: (event) => {
+        state = step(state, event);
+      },
+      fetchById: async (id) => ({ request: { id, reference: "REQ-OFFPAGE", status: openStatus } }),
+      lookupByAttempt: async () => {
+        throw new Error("should not run");
+      },
+      historyRows: [], // Page 2 empty or request paged out.
+    });
+    assert.equal(res.outcome, "still_open");
+    assert.equal(isDuplicateDraft(state), true);
+    assert.equal(state.duplicateRequest?.id, "req-offpage");
+  }
+
+  // Transient fetch errors keep the lock safely intact.
+  let erroredState = step(step(edited(), { type: "prepare", key: "err-key" }), {
+    type: "duplicate",
+    existingRequest: { id: "req-err", reference: "REQ-ERR" },
+  });
+  const errRes = await reconcileDuplicateLock({
+    epoch: erroredState.duplicateEpoch,
+    getState: () => erroredState,
+    dispatch: (event) => {
+      erroredState = step(erroredState, event);
+    },
+    fetchById: async () => {
+      throw new Error("network unavailable");
+    },
+    lookupByAttempt: async () => {
+      throw new Error("should not run");
+    },
+    historyRows: [],
+  });
+  assert.equal(errRes.outcome, "error");
+  assert.equal(isDuplicateDraft(erroredState), true);
+
+  // Missing-ID race ignores empty history page and checks authorized lookup instead.
+  let missingIdState = step(step(edited(), { type: "prepare", key: "missing-id-open" }), {
+    type: "duplicate",
+  });
+  let lookupCount = 0;
+  const matched = await reconcileDuplicateLock({
+    epoch: missingIdState.duplicateEpoch,
+    getState: () => missingIdState,
+    dispatch: (event) => {
+      missingIdState = step(missingIdState, event);
+    },
+    fetchById: async () => {
+      throw new Error("should not fetch by ID yet");
+    },
+    lookupByAttempt: async () => {
+      lookupCount += 1;
+      return { open: true, request: { id: "discovered-id", reference: "REQ-DISC", status: "in_progress" } };
+    },
+    historyRows: [],
+  });
+  assert.equal(lookupCount, 1);
+  assert.equal(matched.outcome, "still_open");
+  assert.equal(isDuplicateDraft(missingIdState), true);
+  assert.deepEqual(missingIdState.duplicateRequest, { id: "discovered-id", reference: "REQ-DISC" });
+
+  // Missing-ID race unlocks once authorized lookup confirms zero open matching requests remain.
+  let missingClosedState = step(step(edited(), { type: "prepare", key: "missing-id-closed" }), {
+    type: "duplicate",
+  });
+  const closed = await reconcileDuplicateLock({
+    epoch: missingClosedState.duplicateEpoch,
+    getState: () => missingClosedState,
+    dispatch: (event) => {
+      missingClosedState = step(missingClosedState, event);
+    },
+    fetchById: async () => {
+      throw new Error("should not fetch by ID");
+    },
+    lookupByAttempt: async () => ({ open: false, request: { id: "closed-match", reference: "REQ-CL", status: "completed" } }),
+    historyRows: [],
+  });
+  assert.equal(closed.outcome, "resolved");
+  assert.equal(closed.shouldRefreshAgent, true);
+  assert.equal(isDuplicateDraft(missingClosedState), false);
+});
+
+test("delayed polling responses cannot unlock a newer duplicate or discard a newer retry key", async () => {
+  let state = step(step(edited(), { type: "prepare", key: "key-1" }), {
+    type: "duplicate",
+    existingRequest: { id: "req-1", reference: "REQ-0001" },
+  });
+  const staleEpoch = state.duplicateEpoch;
+
+  let releaseDelayedFetch!: (value: { request: DuplicateStatusRecord }) => void;
+  const delayedPollPromise = reconcileDuplicateLock({
+    epoch: staleEpoch,
+    getState: () => state,
+    dispatch: (event) => {
+      state = step(state, event);
+    },
+    fetchById: () =>
+      new Promise((resolve) => {
+        releaseDelayedFetch = resolve;
+      }),
+    lookupByAttempt: async () => {
+      throw new Error("should not run");
+    },
+    historyRows: [],
+  });
+
+  // Before delayed poll settles, lock 1 resolves and customer hits a duplicate on a newer request req-2.
+  state = step(state, { type: "duplicate_resolved", epoch: staleEpoch, requestId: "req-1" });
+  state = step(step(state, { type: "notes", notes: "FICTIONAL second duplicate" }), { type: "prepare", key: "key-2" });
+  state = step(state, { type: "duplicate", existingRequest: { id: "req-2", reference: "REQ-0002" } });
+  const req2Epoch = state.duplicateEpoch;
+
+  // Delayed poll from req-1 returns cancelled; must be ignored cleanly.
+  releaseDelayedFetch({ request: { id: "req-1", reference: "REQ-0001", status: "cancelled" } });
+  const delayedOutcome = await delayedPollPromise;
+  assert.equal(delayedOutcome.outcome, "noop");
+  assert.equal(state.duplicateEpoch, req2Epoch);
+  assert.equal(state.duplicateRequest?.id, "req-2");
+  assert.equal(isDuplicateDraft(state), true);
+
+  // Delayed poll returning pending after lock resolution must also remain a noop.
+  let releasePending!: (value: { request: DuplicateStatusRecord }) => void;
+  const delayedPendingPoll = reconcileDuplicateLock({
+    epoch: req2Epoch,
+    getState: () => state,
+    dispatch: (event) => {
+      state = step(state, event);
+    },
+    fetchById: () =>
+      new Promise((resolve) => {
+        releasePending = resolve;
+      }),
+    lookupByAttempt: async () => {
+      throw new Error("should not run");
+    },
+    historyRows: [],
+  });
+  state = step(state, { type: "duplicate_resolved", epoch: req2Epoch, requestId: "req-2" });
+  releasePending({ request: { id: "req-2", reference: "REQ-0002", status: "pending" } });
+  assert.equal((await delayedPendingPoll).outcome, "noop");
+  assert.equal(state.duplicateAttempt, null);
+
+  // New attempt with retry key is preserved when an older duplicate lock resolves in the background.
+  let stateWithNewRetry = step(step(edited(), { type: "prepare", key: "old-dup-key" }), {
+    type: "duplicate",
+    existingRequest: { id: "req-old", reference: "REQ-OLD" },
+  });
+  const oldEpoch = stateWithNewRetry.duplicateEpoch;
+  stateWithNewRetry = step(step(stateWithNewRetry, { type: "notes", notes: "FICTIONAL modified intent" }), {
+    type: "prepare",
+    key: "preserve-retry-key",
+  });
+  const retryUnlock = await reconcileDuplicateLock({
+    epoch: oldEpoch,
+    getState: () => stateWithNewRetry,
+    dispatch: (event) => {
+      stateWithNewRetry = step(stateWithNewRetry, event);
+    },
+    fetchById: async (id) => ({ request: { id, reference: "REQ-OLD", status: "rejected" } }),
+    lookupByAttempt: async () => {
+      throw new Error("should not run");
+    },
+    historyRows: [],
+  });
+  assert.equal(retryUnlock.outcome, "resolved");
+  assert.equal(stateWithNewRetry.duplicateAttempt, null);
+  assert.equal(stateWithNewRetry.attempt?.idempotency_key, "preserve-retry-key");
+  assert.equal(stateWithNewRetry.notes, "FICTIONAL modified intent");
 });
