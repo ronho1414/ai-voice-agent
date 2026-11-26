@@ -33,7 +33,16 @@ export function submissionFeedback(request: { status: RequestStatus; reference: 
 }
 export type ChangeRequest = { id: string; reference: string; organization_id: string; agent_id: string; submitted_by: string; previous_settings: Preferences; requested_settings: Preferences; changed_fields: (keyof Preferences)[]; additional_notes: string; status: RequestStatus; assigned_admin_id: string | null; customer_visible_response: string; final_applied_settings: Preferences | null; base_version: number; version: number; created_at: string; updated_at: string; completed_at: string | null; organizations?: { name: string; slug: string }; overdue?: boolean };
 export type RequestEvent = { id: string; kind: string; message: string; created_at: string; actor_id: string };
-export type Notification = { id: string; request_id: string; title: string; created_at: string; read_at: string | null };
+export type Notification = {
+  id: string;
+  kind?: "agent_request" | "message";
+  request_id: string | null;
+  message_id?: string | null;
+  organization_id?: string | null;
+  title: string;
+  created_at: string;
+  read_at: string | null;
+};
 export function parsePreferences(value: unknown): Preferences {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("請檢查服務偏好。");
   const p = value as Record<string, unknown>;

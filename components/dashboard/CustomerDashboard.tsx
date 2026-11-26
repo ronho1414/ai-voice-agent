@@ -10,9 +10,11 @@ import type {
   KnowledgeSource,
   SourceType,
 } from "@/lib/platform/types";
-import { CustomerAgentPanel, NotificationBell } from "@/components/managed-agent";
+import { CustomerAgentPanel, MANAGED_REFRESH_EVENT, NotificationBell } from "@/components/managed-agent";
+import { MessageInboxPanel } from "@/components/messages/MessageInboxPanel";
+import type { MessageCounts } from "@/lib/platform/messages";
 
-type DashboardIconName = "overview" | "calls" | "appointments" | "knowledge" | "profile" | "agent";
+type DashboardIconName = "overview" | "calls" | "appointments" | "messages" | "knowledge" | "profile" | "agent";
 
 type ConversationTranscriptTurn = {
   role: string;
@@ -46,6 +48,7 @@ function DashboardIcon({ name, className = "h-5 w-5" }: { name: DashboardIconNam
       {name === "overview" && <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>}
       {name === "calls" && <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.4 19.4 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 8.9a16 16 0 0 0 6 6l1.2-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.8 2.1Z"/>}
       {name === "appointments" && <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18M9 15l2 2 4-4"/></>}
+      {name === "messages" && <><path d="M4 5h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H8l-4 3V7a2 2 0 0 1 2-2Z"/><path d="M8 10h8M8 14h5"/></>}
       {name === "knowledge" && <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M4 5.5v13A2.5 2.5 0 0 1 6.5 16H20M8 7h8M8 10h7"/></>}
       {name === "profile" && <><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18M10 12v2h4v-2"/></>}
       {name === "agent" && <><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M9 13h.01M15 13h.01M9 17h6"/><circle cx="12" cy="3" r="1"/></>}
@@ -58,7 +61,7 @@ export function CustomerDashboard() {
   const [authenticated, setAuthenticated] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
-  const [tab, setTab] = useState<"overview" | "calls" | "appointments" | "knowledge" | "profile" | "agent">("overview");
+  const [tab, setTab] = useState<"overview" | "calls" | "appointments" | "messages" | "knowledge" | "profile" | "agent">("overview");
 
   // Overview data
   const [overview, setOverview] = useState<CustomerOverview | null>(null);
@@ -79,6 +82,8 @@ export function CustomerDashboard() {
   const [profSatSun, setProfSatSun] = useState("");
 
   const [focusRequestId, setFocusRequestId] = useState<string | null>(null);
+  const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
+  const [pendingMessageCount, setPendingMessageCount] = useState<number | null>(null);
 
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -91,6 +96,19 @@ export function CustomerDashboard() {
 
   const clearFocusRequest = useCallback(() => {
     setFocusRequestId(null);
+  }, []);
+
+  const openInboxMessage = useCallback((messageId: string) => {
+    setFocusMessageId(messageId);
+    setTab("messages");
+  }, []);
+
+  const clearFocusMessage = useCallback(() => {
+    setFocusMessageId(null);
+  }, []);
+
+  const handleMessageCounts = useCallback((counts: MessageCounts) => {
+    setPendingMessageCount(counts.pending);
   }, []);
 
   // Check auth session on mount
@@ -164,6 +182,37 @@ export function CustomerDashboard() {
       void loadCustomerData();
     }
   }, [authenticated, tab, loadCustomerData]);
+
+  useEffect(() => {
+    if (!authenticated) return;
+    let cancelled = false;
+    async function loadMessageBadge() {
+      try {
+        const res = await fetch("/api/platform/customer/messages?page=1", { cache: "no-store" });
+        if (!res.ok) return;
+        const body = await res.json();
+        const pending = body?.counts?.pending;
+        if (!cancelled && typeof pending === "number") {
+          setPendingMessageCount(pending);
+        }
+      } catch {
+        // Keep last known count.
+      }
+    }
+    void loadMessageBadge();
+    const timer = window.setInterval(() => {
+      void loadMessageBadge();
+    }, 15_000);
+    const onRefresh = () => {
+      void loadMessageBadge();
+    };
+    window.addEventListener(MANAGED_REFRESH_EVENT, onRefresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener(MANAGED_REFRESH_EVENT, onRefresh);
+    };
+  }, [authenticated]);
 
   async function handleLogin(e: FormEvent) {
     e.preventDefault();
@@ -509,6 +558,27 @@ export function CustomerDashboard() {
 
           <button
             type="button"
+            onClick={() => setTab("messages")}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
+              tab === "messages" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
+            }`}
+          >
+            <DashboardIcon name="messages" />
+            <span className="flex-1">留言及跟進</span>
+            {pendingMessageCount !== null && pendingMessageCount > 0 && (
+              <span
+                aria-label={`待處理 ${pendingMessageCount} 則`}
+                className={`min-w-[1.25rem] rounded-full px-1.5 py-0.5 text-center text-[10px] font-extrabold ${
+                  tab === "messages" ? "bg-white text-[#09090B]" : "bg-[#09090B] text-white"
+                }`}
+              >
+                {pendingMessageCount > 99 ? "99+" : pendingMessageCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setTab("knowledge")}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
               tab === "knowledge" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
@@ -557,7 +627,7 @@ export function CustomerDashboard() {
         <div className="mb-7 flex items-center justify-between gap-4">
           <div className="font-bold text-base">Orai 客戶管理後台</div>
           <div className="flex items-center gap-3">
-            <NotificationBell onOpenRequest={openManagedRequest} />
+            <NotificationBell onOpenRequest={openManagedRequest} onOpenMessage={openInboxMessage} />
             <span className="rounded-full bg-sky-100 px-3 py-1 text-[11px] font-bold text-sky-700">商戶專屬</span>
           </div>
         </div>
@@ -1180,6 +1250,15 @@ export function CustomerDashboard() {
           <CustomerAgentPanel
             initialRequestId={focusRequestId}
             onRequestHandled={clearFocusRequest}
+          />
+        )}
+
+        {tab === "messages" && (
+          <MessageInboxPanel
+            apiPath="/api/platform/customer/messages"
+            initialMessageId={focusMessageId}
+            onMessageHandled={clearFocusMessage}
+            onCountsChange={handleMessageCounts}
           />
         )}
       </main>

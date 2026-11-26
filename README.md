@@ -49,6 +49,12 @@ deploying the application:
 1. `supabase/migrations/001_multi_tenant_foundation.sql`
 2. `supabase/migrations/002_rls_write_hardening.sql`
 3. `supabase/migrations/20261123105304_auth_tenant_isolation.sql`
+4. `supabase/migrations/20261123110214_beauty_appointment_requests.sql`
+5. `supabase/migrations/20261123233500_update_appointment_transition.sql`
+6. `supabase/migrations/20261124055712_elevenlabs_post_call.sql`
+7. `supabase/migrations/20261124103151_immutable_agent_ownership.sql`
+8. `supabase/migrations/20261124160158_managed_agent_requests.sql`
+9. `supabase/migrations/20261126023000_message_inbox.sql`
 
 The last migration replaces the platform policies and grants, disables profile
 creation/deletion and role updates through the user Data API, and restricts

@@ -11,9 +11,10 @@ type NotificationsResponse = {
 
 type NotificationBellProps = {
   onOpenRequest: (requestId: string) => void;
+  onOpenMessage?: (messageId: string) => void;
 };
 
-export function NotificationBell({ onOpenRequest }: NotificationBellProps) {
+export function NotificationBell({ onOpenRequest, onOpenMessage }: NotificationBellProps) {
   const panelId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -116,7 +117,13 @@ export function NotificationBell({ onOpenRequest }: NotificationBellProps) {
       }
     }
     setOpen(false);
-    onOpenRequest(item.request_id);
+    if (item.kind === "message" && item.message_id && onOpenMessage) {
+      onOpenMessage(item.message_id);
+      return;
+    }
+    if (item.request_id) {
+      onOpenRequest(item.request_id);
+    }
   }
 
   return (

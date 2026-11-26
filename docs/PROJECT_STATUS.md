@@ -1,6 +1,26 @@
 # Orai Service — Project Status & Security Review
 
-> Latest milestone (2026-11-25): PR #5 duplicate-lock reconciliation (`dcf4bbf` / `6c63ace` / `a7bd916`) passed Cursor Bugbot (`success`) and all 6 live Edge browser + PostgREST acceptance checks on isolated staging (`dpl_7S99nbXRopFtzTbXwyMYwLdFRbfN` at `https://orai-pr4-staging.vercel.app`). Integration branch `integrate/pr4-pr5-main` now combines `origin/main` (`bb7b371`, merged PR #6 domain/SEO) with PR #4 and PR #5.
+> Latest milestone (2026-11-26): **AI Message Inbox & Human Follow-up V1** implemented on `integrate/pr4-pr5-main` (pending staging DB migration approval and staging deployment before live ElevenLabs Server Tool acceptance). Earlier milestone (2026-11-25): PR #5 duplicate-lock reconciliation (`dcf4bbf` / `6c63ace` / `a7bd916`) passed Cursor Bugbot (`success`) and all 6 live Edge browser + PostgREST acceptance checks on isolated staging (`https://orai-pr4-staging.vercel.app`).
+
+## AI Message Inbox & Human Follow-up V1 (2026-11-26, staged on `integrate/pr4-pr5-main`)
+
+- **Database & Tenant Isolation (`supabase/migrations/20261126023000_message_inbox.sql`):**
+  - Added `public.messages` (`MSG-000001` identity reference, `inbox_scope` in `'admin'|'merchant'`, `category` across 6 enum values, `status` in `'pending'|'in_progress'|'completed'`, optimistic `version`, `idempotency_key`, `payload_hash`), `public.message_events` (immutable audit trail), `public.message_internal_notes` (private staff notes scoped to owning merchant org or `super_admin`), and locked `public.agent_tool_credentials` (revoked from `public, anon, authenticated`; service-only).
+  - Reused `public.notifications` by adding `kind` (`'agent_request'|'message'`), nullable `request_id`/`organization_id`, and `message_id`, with updated `notifications_read` RLS so merchant members see only their tenant's notifications and `super_admin` sees admin-scoped notifications (`organization_id is null`) without cross-tenant leakage.
+  - Added immutability trigger (`private.guard_message_immutability`) preventing edits to original message content, sender/recipient identity, tenant ownership, or already-linked `conversation_id`, plus `private.link_messages_on_conversation_sync` on `public.conversations` to auto-link mid-call merchant messages when post-call webhooks sync transcripts.
+  - All mutations go through service-only RPCs `public.set_agent_tool_credential(...)`, `public.create_elevenlabs_message(jsonb)`, and `public.message_inbox_command(uuid, uuid, text, jsonb)`.
+- **ElevenLabs Server Tool (`POST /api/tools/elevenlabs/create-message`):**
+  - Enforces **agent-scoped credentials**: every merchant agent authenticates via its own per-agent Bearer token stored exclusively as a SHA-256 hash in `public.agent_tool_credentials`, while `ELEVENLABS_MARKETING_TOOL_SECRET` authenticates exclusively the Orai marketing agent (`ORAI_MARKETING_AGENT_ID`, default `agent_8201m7sbetj3e36s1a2nv3fgcqna` -> `inbox_scope = 'admin'`).
+  - Never trusts caller-supplied `organizationId`, `merchantId`, or unverified `X-ElevenLabs-Agent-Id` overrides: if `X-ElevenLabs-Agent-Id` (`{{system__agent_id}}`) is supplied and does not match the credential's bound agent identity, the endpoint rejects with HTTP `403 Forbidden` (blocking cross-agent impersonation); fails closed with `503`/`401` and `{"ok":false,"recorded":false}` when unconfigured or invalid.
+  - Supports multiple legitimate distinct messages in the same conversation while deduplicating retries cleanly (via `X-Idempotency-Key` or conversation + payload SHA-256 hash) and rejecting reused keys with changed payloads (`409`).
+- **Dashboards & Notifications:**
+  - Added **「留言及跟進」** (`components/messages/MessageInboxPanel.tsx`) to both Customer Dashboard (`/dashboard` -> `/api/platform/customer/messages`) and Admin Dashboard (`/admin` -> `/api/platform/admin/messages`) with pending badges, summary cards (`待處理` / `跟進中` / `已完成`), search, status/category filters, newest-first sorting, internal follow-up notes, status audit trail, and linked conversation transcript viewer.
+  - Extended `NotificationBell` (`components/managed-agent/NotificationBell.tsx`) to route `kind === "message"` alerts directly to the corresponding message detail view.
+- **Verification & Deployment Status (2026-11-26):**
+  - Independent `orai-test-runner` local verification passed **90/90** tests (`domain 9`, `security 31`, `booking 8`, `webhooks 5`, `managed-agent 31`, `messages 6`), `tsc --noEmit`, `eslint` (0 errors), `next build`, and built-server HTTP/CSRF smoke checks on port 3014.
+  - Staging Supabase (`wnajobvcldveajtdvbwg`) tables backed up (`2` orgs, `3` profiles, `2` agents, `5` conversations, `1` appointment, `2` prefs, `24` requests, `84` notifications), `20261126023000_message_inbox.sql` applied cleanly, `ELEVENLABS_MARKETING_TOOL_SECRET` & `ORAI_MARKETING_AGENT_ID` set on `orai-pr4-staging`, and staging merchant agent credentials seeded as SHA-256 hashes.
+- **Retention & Privacy Notes:**
+  - Personal contact details (`sender_name`, `contact_phone`) and `message_content` are protected by tenant/admin RLS and cascade-delete on organization removal (`on delete cascade` / `conversations` `on delete set null`). Automated TTL purging / PII redaction schedule remains unresolved prior to multi-tenant production launch and requires a formal data-retention policy. Production (`main` / `ai-voice-agent`) remains untouched.
 
 ## Domain Integration PR (#6, merged in `bb7b371`) — 2026-11-25
 
