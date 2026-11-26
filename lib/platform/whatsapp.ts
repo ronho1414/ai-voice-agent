@@ -405,8 +405,51 @@ export type ReserveOutboundResult =
   | { action: "reserved"; record: Record<string, unknown> }
   | { action: "replay"; record: Record<string, unknown> }
   | { action: "in_flight"; record: Record<string, unknown> }
+  | { action: "previous_failed"; record: Record<string, unknown> }
   | { action: "conflict" }
   | { action: "unmapped_channel" };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function parseReconcileWhatsAppInput(raw: Record<string, unknown>, headerIdemKey: string): {
+  reservationId: string;
+  idempotencyKey: string;
+  waMessageId: string;
+  status: "sent" | "failed";
+  errorCode: string;
+  errorTitle: string;
+  errorMessage: string;
+} {
+  const reservationId = typeof raw.reservationId === "string" ? raw.reservationId.trim() : "";
+  const idempotencyKey =
+    headerIdemKey || (typeof raw.idempotencyKey === "string" ? raw.idempotencyKey.trim() : "");
+  if (reservationId && !UUID_RE.test(reservationId)) {
+    throw new ManagedError("reservationId 格式不正確。", 400);
+  }
+  if (!reservationId && !idempotencyKey) {
+    throw new ManagedError("對帳需要提供 reservationId 或 idempotencyKey。", 400);
+  }
+  if ([...idempotencyKey].length > 160) {
+    throw new ManagedError("idempotencyKey 長度不可超過 160 字元。", 400);
+  }
+  const statusRaw = typeof raw.status === "string" ? raw.status.trim().toLowerCase() : "sent";
+  if (statusRaw !== "sent" && statusRaw !== "failed") {
+    throw new ManagedError("對帳狀態僅支援 sent 或 failed。", 400);
+  }
+  const waMessageId = typeof raw.waMessageId === "string" ? raw.waMessageId.trim() : "";
+  if (statusRaw === "sent" && (!waMessageId || waMessageId.length > 128)) {
+    throw new ManagedError("對帳為 sent 時必須提供有效的 waMessageId。", 400);
+  }
+  return {
+    reservationId,
+    idempotencyKey,
+    waMessageId: waMessageId.slice(0, 128),
+    status: statusRaw,
+    errorCode: typeof raw.errorCode === "string" ? raw.errorCode.trim().slice(0, 64) : "",
+    errorTitle: typeof raw.errorTitle === "string" ? raw.errorTitle.trim().slice(0, 200) : "",
+    errorMessage: typeof raw.errorMessage === "string" ? raw.errorMessage.trim().slice(0, 400) : "",
+  };
+}
 
 export type ReserveOutboundWhatsApp = (payload: Record<string, unknown>) => Promise<ReserveOutboundResult>;
 export type FinalizeOutboundWhatsApp = (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -446,16 +489,70 @@ export async function handleAdminWhatsAppSend(
   }
 
   let rawBody: Record<string, unknown>;
-  let input: SendWhatsAppInput;
+  const headerIdemKey = request.headers.get("x-idempotency-key")?.trim() || "";
+  const finalizeFn: FinalizeOutboundWhatsApp =
+    options.finalize ?? options.record ?? defaultFinalizeOutbound;
+
   try {
     rawBody = await readBody(request);
+  } catch (err) {
+    return managedFailure(err);
+  }
+
+  if (typeof rawBody.action === "string" && rawBody.action.trim().toLowerCase() === "reconcile") {
+    try {
+      const rec = parseReconcileWhatsAppInput(rawBody, headerIdemKey);
+      const persisted = await finalizeFn({
+        ...(rec.reservationId ? { id: rec.reservationId } : {}),
+        phone_number_id: config.phoneNumberId,
+        ...(rec.idempotencyKey ? { idempotency_key: rec.idempotencyKey } : {}),
+        status: rec.status,
+        wa_message_id: rec.waMessageId,
+        error_code: rec.errorCode,
+        error_title: rec.errorTitle,
+        error_message: rec.errorMessage,
+        metadata: {
+          graph_version: config.graphVersion,
+          reconciled: true,
+          reconciled_at: new Date().toISOString(),
+        },
+      });
+      const persistedIdemKey =
+        typeof persisted.idempotency_key === "string" && persisted.idempotency_key
+          ? persisted.idempotency_key
+          : rec.idempotencyKey;
+      const persistedReservationId =
+        typeof persisted.id === "string" && persisted.id ? persisted.id : rec.reservationId;
+      const persistedWamid =
+        typeof persisted.wa_message_id === "string" && persisted.wa_message_id
+          ? persisted.wa_message_id
+          : rec.waMessageId;
+      return Response.json(
+        {
+          ok: true,
+          reconciled: true,
+          waMessageId: persistedWamid,
+          status: typeof persisted.status === "string" ? persisted.status : rec.status,
+          reservationId: persistedReservationId,
+          idempotencyKey: persistedIdemKey,
+          record: persisted,
+        },
+        { status: 200, headers: NO_STORE },
+      );
+    } catch (err) {
+      return managedFailure(err);
+    }
+  }
+
+  let input: SendWhatsAppInput;
+  try {
     input = parseSendWhatsAppInput(rawBody);
   } catch (err) {
     return managedFailure(err);
   }
 
   const rawIdemKey =
-    request.headers.get("x-idempotency-key")?.trim() ||
+    headerIdemKey ||
     (typeof rawBody.idempotencyKey === "string" ? rawBody.idempotencyKey.trim() : "") ||
     randomUUID();
   if ([...rawIdemKey].length > 160) {
@@ -473,8 +570,6 @@ export async function handleAdminWhatsAppSend(
     (options.record
       ? async (p) => ({ action: "reserved", record: { id: randomUUID(), ...p } })
       : defaultReserveOutbound);
-  const finalizeFn: FinalizeOutboundWhatsApp =
-    options.finalize ?? options.record ?? defaultFinalizeOutbound;
 
   let reservedRowId = "";
   try {
@@ -498,26 +593,54 @@ export async function handleAdminWhatsAppSend(
     }
     if (reservation.action === "conflict") {
       return Response.json(
-        { ok: false, retrySafe: false, error: "相同的 idempotencyKey 不可用於不同收件人或訊息內容。" },
+        { ok: false, retrySafe: false, idempotencyKey: rawIdemKey, error: "相同的 idempotencyKey 不可用於不同收件人或訊息內容。" },
         { status: 409, headers: NO_STORE },
       );
     }
     if (reservation.action === "replay") {
       const existing = reservation.record;
+      const existingIdemKey =
+        typeof existing.idempotency_key === "string" && existing.idempotency_key
+          ? existing.idempotency_key
+          : rawIdemKey;
       return Response.json(
         {
           ok: true,
           replayed: true,
           waMessageId: typeof existing.wa_message_id === "string" ? existing.wa_message_id : "",
           status: typeof existing.status === "string" ? existing.status : "sent",
-          idempotencyKey: rawIdemKey,
+          idempotencyKey: existingIdemKey,
           record: existing,
         },
         { status: 200, headers: NO_STORE },
       );
     }
+    if (reservation.action === "previous_failed") {
+      const existing = reservation.record;
+      const existingIdemKey =
+        typeof existing.idempotency_key === "string" && existing.idempotency_key
+          ? existing.idempotency_key
+          : rawIdemKey;
+      return Response.json(
+        {
+          ok: false,
+          replayed: false,
+          retrySafe: false,
+          reconciliationRequired: false,
+          previousStatus: "failed",
+          reservationId: typeof existing.id === "string" ? existing.id : "",
+          idempotencyKey: existingIdemKey,
+          error: "此 idempotencyKey 先前發送失敗；請確認狀態後改用新的 idempotencyKey 重新送出。",
+        },
+        { status: 409, headers: NO_STORE },
+      );
+    }
     if (reservation.action === "in_flight") {
       const existing = reservation.record;
+      const existingIdemKey =
+        typeof existing.idempotency_key === "string" && existing.idempotency_key
+          ? existing.idempotency_key
+          : rawIdemKey;
       return Response.json(
         {
           ok: false,
@@ -525,7 +648,7 @@ export async function handleAdminWhatsAppSend(
           retrySafe: false,
           reconciliationRequired: true,
           reservationId: typeof existing.id === "string" ? existing.id : "",
-          idempotencyKey: rawIdemKey,
+          idempotencyKey: existingIdemKey,
           error: "相同請求正在發送中或尚待對帳，已攔截重複送出。",
         },
         { status: 409, headers: NO_STORE },
@@ -699,7 +822,7 @@ export async function handleAdminWhatsAppStatus(
     const [msgsRes, evRes] = await Promise.all([
       db
         .from("whatsapp_messages")
-        .select("id,scope,organization_id,phone_number_id,direction,wa_message_id,peer_wa_id,peer_name,message_type,template_name,body_text,status,error_code,error_title,error_message,sent_at,delivered_at,read_at,failed_at,received_at,created_at")
+        .select("id,scope,organization_id,phone_number_id,direction,wa_message_id,peer_wa_id,peer_name,message_type,template_name,body_text,status,idempotency_key,error_code,error_title,error_message,sent_at,delivered_at,read_at,failed_at,received_at,created_at")
         .eq("scope", "admin")
         .order("created_at", { ascending: false })
         .limit(30),

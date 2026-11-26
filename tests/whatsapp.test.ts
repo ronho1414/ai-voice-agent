@@ -244,7 +244,7 @@ before(async () => {
     if (url.pathname === "/rest/v1/whatsapp_messages") {
       const scopeFilter = url.searchParams.get("scope") === "eq.admin" ? "where scope = 'admin'" : "";
       const { rows } = await db.query(
-        `select id,scope,organization_id,phone_number_id,direction,wa_message_id,peer_wa_id,peer_name,message_type,template_name,body_text,status,error_code,error_title,error_message,sent_at,delivered_at,read_at,failed_at,received_at,created_at from public.whatsapp_messages ${scopeFilter} order by created_at desc limit 30`,
+        `select id,scope,organization_id,phone_number_id,direction,wa_message_id,peer_wa_id,peer_name,message_type,template_name,body_text,status,idempotency_key,error_code,error_title,error_message,sent_at,delivered_at,read_at,failed_at,received_at,created_at from public.whatsapp_messages ${scopeFilter} order by created_at desc limit 30`,
       );
       return Response.json(rows);
     }
@@ -564,6 +564,7 @@ test("admin WhatsApp send endpoint enforces RBAC, CSRF, sends template v25.0, an
   assert.equal(conflictRes.status, 409);
 
   // If Meta ACCEPTS (wamid returned) but DB finalize fails, surface reconciliation metadata cleanly (never silent retry)
+  let metaCallsForReconcile = 0;
   const partialFailRes = await handleAdminWhatsAppSend(
     new Request(`${base}/api/platform/admin/whatsapp/send`, {
       method: "POST",
@@ -571,6 +572,14 @@ test("admin WhatsApp send endpoint enforces RBAC, CSRF, sends template v25.0, an
       body: JSON.stringify({ to: "85291234567", type: "template", templateName: "hello_world" }),
     }),
     {
+      fetchImpl: async () => {
+        metaCallsForReconcile += 1;
+        return Response.json({
+          messaging_product: "whatsapp",
+          contacts: [{ input: "85291234567", wa_id: "85291234567" }],
+          messages: [{ id: "wamid.fictional_reconcile_001" }],
+        });
+      },
       finalize: async () => {
         throw new Error("Simulated post-send DB failure");
       },
@@ -582,9 +591,10 @@ test("admin WhatsApp send endpoint enforces RBAC, CSRF, sends template v25.0, an
   assert.equal(partialFailBody.persisted, false);
   assert.equal(partialFailBody.reconciliationRequired, true);
   assert.equal(partialFailBody.retrySafe, false);
-  assert.equal(partialFailBody.waMessageId, "wamid.fictional_stage_send_002");
+  assert.equal(partialFailBody.waMessageId, "wamid.fictional_reconcile_001");
+  assert.equal(partialFailBody.idempotencyKey, "wa-reconcile-001");
 
-  // Re-submitting same idempotencyKey while unconfirmed in 'queued' blocks duplicate send (409)
+  // Re-submitting same idempotencyKey while unconfirmed in 'queued' blocks duplicate send (409) and preserves idempotencyKey
   const dupWhileQueued = await adminWhatsAppPost(
     new Request(`${base}/api/platform/admin/whatsapp/send`, {
       method: "POST",
@@ -598,7 +608,104 @@ test("admin WhatsApp send endpoint enforces RBAC, CSRF, sends template v25.0, an
     }),
   );
   assert.equal(dupWhileQueued.status, 409);
-  assert.equal((await dupWhileQueued.json()).reconciliationRequired, true);
+  const dupQueuedBody = await dupWhileQueued.json();
+  assert.equal(dupQueuedBody.reconciliationRequired, true);
+  assert.equal(dupQueuedBody.idempotencyKey, "wa-reconcile-001");
+
+  // Simulate Meta webhook 'delivered' arriving BEFORE DB reconciliation (creates temp orphan wamid row)
+  const earlyWebhookPayload = JSON.stringify({
+    object: "whatsapp_business_account",
+    entry: [
+      {
+        id: wabaId,
+        changes: [
+          {
+            field: "messages",
+            value: {
+              metadata: { phone_number_id: phoneNumberId },
+              statuses: [
+                {
+                  id: "wamid.fictional_reconcile_001",
+                  status: "delivered",
+                  timestamp: "1764160050",
+                  recipient_id: "85291234567",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  });
+  const earlyWebhookRes = await whatsappWebhookPost(
+    new Request(`${base}/api/webhooks/whatsapp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-hub-signature-256": signBody(earlyWebhookPayload),
+      },
+      body: earlyWebhookPayload,
+    }),
+  );
+  assert.equal(earlyWebhookRes.status, 200);
+
+  // Explicit reconciliation merges the early webhook orphan row, keeps 'delivered', and preserves original idempotency_key (NO duplicate Meta call)
+  const reconcileRes = await adminWhatsAppPost(
+    new Request(`${base}/api/platform/admin/whatsapp/send`, {
+      method: "POST",
+      headers: {
+        origin: base,
+        cookie: adminCookie,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action: "reconcile",
+        reservationId: partialFailBody.reservationId,
+        idempotencyKey: "wa-reconcile-001",
+        waMessageId: "wamid.fictional_reconcile_001",
+        status: "sent",
+      }),
+    }),
+  );
+  assert.equal(reconcileRes.status, 200);
+  const reconcileBody = await reconcileRes.json();
+  assert.equal(reconcileBody.ok, true);
+  assert.equal(reconcileBody.reconciled, true);
+  assert.equal(reconcileBody.waMessageId, "wamid.fictional_reconcile_001");
+  assert.equal(reconcileBody.status, "delivered");
+  assert.equal(reconcileBody.idempotencyKey, "wa-reconcile-001");
+  assert.equal(metaCallsForReconcile, 1);
+
+  // After reconciliation, retrying with original idempotencyKey replays cleanly with preserved key and waMessageId
+  const replayAfterReconcile = await adminWhatsAppPost(
+    new Request(`${base}/api/platform/admin/whatsapp/send`, {
+      method: "POST",
+      headers: {
+        origin: base,
+        cookie: adminCookie,
+        "x-idempotency-key": "wa-reconcile-001",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ to: "85291234567", type: "template", templateName: "hello_world" }),
+    }),
+  );
+  assert.equal(replayAfterReconcile.status, 200);
+  const replayReconcileBody = await replayAfterReconcile.json();
+  assert.equal(replayReconcileBody.replayed, true);
+  assert.equal(replayReconcileBody.waMessageId, "wamid.fictional_reconcile_001");
+  assert.equal(replayReconcileBody.status, "delivered");
+  assert.equal(replayReconcileBody.idempotencyKey, "wa-reconcile-001");
+
+  const consolidatedRows = (
+    await db.query<{ id: string; idempotency_key: string; status: string }>(
+      "select id, idempotency_key, status from public.whatsapp_messages where wa_message_id = $1",
+      ["wamid.fictional_reconcile_001"],
+    )
+  ).rows;
+  assert.equal(consolidatedRows.length, 1);
+  assert.equal(consolidatedRows[0].id, partialFailBody.reservationId);
+  assert.equal(consolidatedRows[0].idempotency_key, "wa-reconcile-001");
+  assert.equal(consolidatedRows[0].status, "delivered");
 
   // Status endpoint never returns secrets
   const statusRes = await adminWhatsAppGet(

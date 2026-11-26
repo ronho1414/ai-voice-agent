@@ -90,6 +90,9 @@ begin
     if v_existing.status in ('sent', 'delivered', 'read') then
       return jsonb_build_object('action', 'replay', 'record', to_jsonb(v_existing));
     end if;
+    if v_existing.status = 'failed' then
+      return jsonb_build_object('action', 'previous_failed', 'record', to_jsonb(v_existing));
+    end if;
     return jsonb_build_object('action', 'in_flight', 'record', to_jsonb(v_existing));
   end if;
 
@@ -110,11 +113,13 @@ end $$;
 revoke all on function public.reserve_whatsapp_outbound(jsonb) from public, anon, authenticated;
 grant execute on function public.reserve_whatsapp_outbound(jsonb) to service_role;
 
--- Phase 2: Finalize reserved outbound row after Meta Cloud API responds
+-- Phase 2: Finalize or reconcile reserved outbound row after Meta Cloud API responds
 create or replace function public.finalize_whatsapp_outbound(payload jsonb) returns jsonb
 language plpgsql security invoker set search_path = '' as $$
 declare
   v_id uuid;
+  v_phone_number_id text;
+  v_idem_key text;
   v_status text;
   v_wamid text;
   v_err_code text;
@@ -122,12 +127,23 @@ declare
   v_err_msg text;
   v_metadata jsonb;
   v_row public.whatsapp_messages%rowtype;
+  v_orphan public.whatsapp_messages%rowtype;
+  v_orphan_found boolean := false;
+  v_effective_status text;
+  v_best_rank integer;
+  v_row_rank integer;
+  v_orphan_rank integer := 0;
+  v_req_rank integer;
 begin
   if jsonb_typeof(payload) is distinct from 'object' then
     raise exception 'Invalid payload';
   end if;
 
-  v_id := (payload->>'id')::uuid;
+  if coalesce(btrim(payload->>'id'), '') <> '' then
+    v_id := (payload->>'id')::uuid;
+  end if;
+  v_phone_number_id := btrim(coalesce(payload->>'phone_number_id', ''));
+  v_idem_key := btrim(coalesce(payload->>'idempotency_key', ''));
   v_status := btrim(coalesce(payload->>'status', ''));
   v_wamid := btrim(coalesce(payload->>'wa_message_id', ''));
   v_err_code := left(btrim(coalesce(payload->>'error_code', '')), 64);
@@ -139,27 +155,73 @@ begin
     raise exception 'Invalid finalize status' using errcode = '22023';
   end if;
 
-  select * into v_row from public.whatsapp_messages where id = v_id for update;
+  if v_id is not null then
+    select * into v_row from public.whatsapp_messages where id = v_id for update;
+  elsif v_phone_number_id ~ '^[0-9]{5,32}$' and v_idem_key <> '' then
+    select * into v_row
+    from public.whatsapp_messages
+    where scope = 'admin'
+      and phone_number_id = v_phone_number_id
+      and idempotency_key = v_idem_key
+    for update;
+  else
+    raise exception 'Missing outbound reservation identifier' using errcode = '22023';
+  end if;
+
   if not found then
     raise exception 'Reserved outbound message not found' using errcode = 'P0002';
   end if;
 
+  if v_wamid <> '' then
+    perform pg_advisory_xact_lock(hashtext('wa_wamid:' || v_row.phone_number_id || ':' || v_wamid));
+
+    -- Reconcile cleanly if webhook statuses arrived for v_wamid before finalize persisted it
+    select * into v_orphan
+    from public.whatsapp_messages
+    where phone_number_id = v_row.phone_number_id
+      and wa_message_id = v_wamid
+      and id <> v_row.id
+    for update;
+
+    if found then
+      if v_orphan.direction <> v_row.direction
+         or (v_orphan.idempotency_key <> '' and v_orphan.idempotency_key <> v_row.idempotency_key) then
+        raise exception 'WhatsApp message ID already bound to another send' using errcode = '23505';
+      end if;
+      v_orphan_found := true;
+      update public.whatsapp_status_events
+         set whatsapp_message_id = v_row.id
+       where whatsapp_message_id = v_orphan.id;
+      delete from public.whatsapp_messages where id = v_orphan.id;
+    end if;
+  end if;
+
+  v_req_rank := case v_status when 'sent' then 20 when 'failed' then 50 else 0 end;
+  v_row_rank := case v_row.status when 'queued' then 10 when 'sent' then 20 when 'delivered' then 30 when 'read' then 40 when 'failed' then 50 else 0 end;
+  if v_orphan_found then
+    v_orphan_rank := case v_orphan.status when 'queued' then 10 when 'sent' then 20 when 'delivered' then 30 when 'read' then 40 when 'failed' then 50 else 0 end;
+  end if;
+
+  v_best_rank := greatest(v_req_rank, v_row_rank, v_orphan_rank);
+  v_effective_status := case
+    when v_orphan_found and v_orphan_rank = v_best_rank then v_orphan.status
+    when v_row_rank = v_best_rank then v_row.status
+    else v_status
+  end;
+
   update public.whatsapp_messages
      set wa_message_id = case when v_wamid <> '' then v_wamid else wa_message_id end,
-         status = case
-           when (case v_status when 'sent' then 20 when 'failed' then 50 else 0 end)
-                >= (case status when 'queued' then 10 when 'sent' then 20 when 'delivered' then 30 when 'read' then 40 when 'failed' then 50 else 0 end)
-           then v_status
-           else status
-         end,
-         error_code = case when v_err_code <> '' then v_err_code else error_code end,
-         error_title = case when v_err_title <> '' then v_err_title else error_title end,
-         error_message = case when v_err_msg <> '' then v_err_msg else error_message end,
-         metadata = coalesce(metadata, '{}'::jsonb) || v_metadata,
-         sent_at = case when v_status = 'sent' then coalesce(sent_at, now()) else sent_at end,
-         failed_at = case when v_status = 'failed' then coalesce(failed_at, now()) else failed_at end,
+         status = v_effective_status,
+         error_code = coalesce(nullif(v_err_code, ''), case when v_orphan_found then nullif(v_orphan.error_code, '') end, error_code),
+         error_title = coalesce(nullif(v_err_title, ''), case when v_orphan_found then nullif(v_orphan.error_title, '') end, error_title),
+         error_message = coalesce(nullif(v_err_msg, ''), case when v_orphan_found then nullif(v_orphan.error_message, '') end, error_message),
+         metadata = coalesce(case when v_orphan_found then v_orphan.metadata else null end, '{}'::jsonb) || coalesce(metadata, '{}'::jsonb) || v_metadata,
+         sent_at = coalesce(sent_at, case when v_orphan_found then v_orphan.sent_at end, case when v_status = 'sent' then now() end),
+         delivered_at = coalesce(delivered_at, case when v_orphan_found then v_orphan.delivered_at end),
+         read_at = coalesce(read_at, case when v_orphan_found then v_orphan.read_at end),
+         failed_at = coalesce(failed_at, case when v_orphan_found then v_orphan.failed_at end, case when v_status = 'failed' then now() end),
          updated_at = now()
-   where id = v_id
+   where id = v_row.id
    returning * into v_row;
 
   if v_wamid <> '' then
