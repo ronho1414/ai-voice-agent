@@ -1,6 +1,19 @@
 # Orai Service — Project Status & Security Review
 
-> Latest milestone (2026-11-26): **AI Message Inbox & Human Follow-up V1** implemented on `integrate/pr4-pr5-main` (pending staging DB migration approval and staging deployment before live ElevenLabs Server Tool acceptance). Earlier milestone (2026-11-25): PR #5 duplicate-lock reconciliation (`dcf4bbf` / `6c63ace` / `a7bd916`) passed Cursor Bugbot (`success`) and all 6 live Edge browser + PostgREST acceptance checks on isolated staging (`https://orai-pr4-staging.vercel.app`).
+> Latest milestone (2026-11-26): **WhatsApp Cloud API Staging V1** (`integrate/pr4-pr5-main`, pending secret injection & Meta webhook/live send verification) alongside **AI Message Inbox & Human Follow-up V1** (`dpl_DcfhJ5kFquNKXTvwQXVZqVaxMuE3` at `https://orai-pr4-staging.vercel.app`, including live ElevenLabs `create_message` receipt `MSG-000004` on `staging-salon-a`).
+
+## WhatsApp Cloud API Staging V1 (2026-11-26, `integrate/pr4-pr5-main`)
+
+- **Outbound Messaging (`lib/platform/whatsapp.ts`, `POST/GET /api/platform/admin/whatsapp/send`):**
+  - Strictly `super_admin` + same-origin CSRF gated (`requireSuperAdmin` + `withPlatformRequest`); supports Meta Graph API `v25.0` template sends (e.g. `hello_world` `en_US`) and 24-hour customer-care free-form text sends using backend-only `WHATSAPP_ACCESS_TOKEN` & `WHATSAPP_PHONE_NUMBER_ID`.
+  - Records outbound attempts & Meta `wamid` IDs in `public.whatsapp_messages` (`record_whatsapp_outbound`) and sanitizes upstream Graph API errors (never exposing tokens).
+- **Webhook Verification & Signature Enforcement (`GET/POST /api/webhooks/whatsapp`):**
+  - `GET`: verifies `hub.mode=subscribe` and constant-time SHA-256 comparison of `hub.verify_token` against `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, returning `hub.challenge` (`text/plain`).
+  - `POST`: reads raw body bytes (`<= 2 MB`), validates `X-Hub-Signature-256` (`sha256=<hmac>`) using `crypto.timingSafeEqual` and `WHATSAPP_APP_SECRET`, parses `statuses` (`sent`, `delivered`, `read`, `failed`) and inbound `messages`, and ingests via service-only `public.ingest_whatsapp_webhook(jsonb)` with out-of-order regression protection (`delivered` cannot regress to `sent`).
+- **Database Isolation (`supabase/migrations/20261126140000_whatsapp_cloud_api.sql`):**
+  - Added `public.whatsapp_channels`, `public.whatsapp_messages`, and `public.whatsapp_status_events` with RLS read policies scoped by tenant (`merchant`) or `super_admin` (`admin`), all direct client writes revoked.
+- **Unpublished / Development Mode Limitations:**
+  - Meta test/unpublished apps can only send messages to explicitly verified test recipient numbers listed in Meta App Dashboard → API Setup, require approved templates (e.g. `hello_world`) outside a 24h inbound window, and cannot enable external webhooks across Vercel `vercel_authentication` unless `orai-pr4-staging` Preview/Production Protection permits the webhook route or passes bypass configuration.
 
 ## AI Message Inbox & Human Follow-up V1 (2026-11-26, staged on `integrate/pr4-pr5-main`)
 

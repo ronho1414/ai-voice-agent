@@ -55,6 +55,7 @@ deploying the application:
 7. `supabase/migrations/20261124103151_immutable_agent_ownership.sql`
 8. `supabase/migrations/20261124160158_managed_agent_requests.sql`
 9. `supabase/migrations/20261126023000_message_inbox.sql`
+10. `supabase/migrations/20261126140000_whatsapp_cloud_api.sql`
 
 The last migration replaces the platform policies and grants, disables profile
 creation/deletion and role updates through the user Data API, and restricts

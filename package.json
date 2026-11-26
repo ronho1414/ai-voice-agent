@@ -14,7 +14,8 @@
     "generate:clips": "tsx scripts/generate-clips.ts",
     "test:webhooks": "node --import tsx --test tests/elevenlabs-webhook.test.ts",
     "test:managed-agent": "node --import tsx --test tests/managed-agent.test.ts tests/managed-agent-api.test.ts tests/managed-agent-draft.test.ts",
-    "test:messages": "node --import tsx --test tests/message-inbox.test.ts"
+    "test:messages": "node --import tsx --test tests/message-inbox.test.ts",
+    "test:whatsapp": "node --import tsx --test tests/whatsapp.test.ts"
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "2.79.0",
