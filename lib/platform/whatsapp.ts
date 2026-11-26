@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { ManagedError, managedFailure, readBody, serviceDatabase } from "./managed-agent-service";
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
@@ -401,8 +401,26 @@ export function parseSendWhatsAppInput(raw: Record<string, unknown>): SendWhatsA
 
 export type RecordOutboundWhatsApp = (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
-async function defaultRecordOutbound(payload: Record<string, unknown>) {
-  const { data, error } = await serviceDatabase().rpc("record_whatsapp_outbound", { payload });
+export type ReserveOutboundResult =
+  | { action: "reserved"; record: Record<string, unknown> }
+  | { action: "replay"; record: Record<string, unknown> }
+  | { action: "in_flight"; record: Record<string, unknown> }
+  | { action: "conflict" }
+  | { action: "unmapped_channel" };
+
+export type ReserveOutboundWhatsApp = (payload: Record<string, unknown>) => Promise<ReserveOutboundResult>;
+export type FinalizeOutboundWhatsApp = (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
+async function defaultReserveOutbound(payload: Record<string, unknown>): Promise<ReserveOutboundResult> {
+  const { data, error } = await serviceDatabase().rpc("reserve_whatsapp_outbound", { payload });
+  if (error || !data || typeof data !== "object") {
+    throw new ManagedError("未能保留 WhatsApp 發送紀錄，已中止送出以免重複發訊。", 503);
+  }
+  return data as ReserveOutboundResult;
+}
+
+async function defaultFinalizeOutbound(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const { data, error } = await serviceDatabase().rpc("finalize_whatsapp_outbound", { payload });
   if (error || !data || typeof data !== "object") {
     throw new ManagedError("WhatsApp 訊息紀錄儲存失敗。", 503);
   }
@@ -414,6 +432,8 @@ export async function handleAdminWhatsAppSend(
   options: {
     config?: WhatsAppRuntimeConfig;
     fetchImpl?: typeof fetch;
+    reserve?: ReserveOutboundWhatsApp;
+    finalize?: FinalizeOutboundWhatsApp;
     record?: RecordOutboundWhatsApp;
   } = {},
 ): Promise<Response> {
@@ -425,9 +445,93 @@ export async function handleAdminWhatsAppSend(
     );
   }
 
+  let rawBody: Record<string, unknown>;
   let input: SendWhatsAppInput;
   try {
-    input = parseSendWhatsAppInput(await readBody(request));
+    rawBody = await readBody(request);
+    input = parseSendWhatsAppInput(rawBody);
+  } catch (err) {
+    return managedFailure(err);
+  }
+
+  const rawIdemKey =
+    request.headers.get("x-idempotency-key")?.trim() ||
+    (typeof rawBody.idempotencyKey === "string" ? rawBody.idempotencyKey.trim() : "") ||
+    randomUUID();
+  if ([...rawIdemKey].length > 160) {
+    return Response.json(
+      { ok: false, error: "idempotencyKey 長度不可超過 160 字元。" },
+      { status: 400, headers: NO_STORE },
+    );
+  }
+  const payloadHash = createHash("sha256")
+    .update(JSON.stringify({ phoneNumberId: config.phoneNumberId, ...input }), "utf8")
+    .digest("hex");
+
+  const reserveFn: ReserveOutboundWhatsApp =
+    options.reserve ??
+    (options.record
+      ? async (p) => ({ action: "reserved", record: { id: randomUUID(), ...p } })
+      : defaultReserveOutbound);
+  const finalizeFn: FinalizeOutboundWhatsApp =
+    options.finalize ?? options.record ?? defaultFinalizeOutbound;
+
+  let reservedRowId = "";
+  try {
+    const reservation = await reserveFn({
+      phone_number_id: config.phoneNumberId,
+      waba_id: config.wabaId,
+      peer_wa_id: input.to,
+      message_type: input.type,
+      template_name: input.type === "template" ? input.templateName : "",
+      body_text: input.type === "text" ? input.body : input.bodyText || "",
+      idempotency_key: rawIdemKey,
+      payload_hash: payloadHash,
+      metadata: { graph_version: config.graphVersion, integration_mode: "orai_admin_staging_test" },
+    });
+
+    if (reservation.action === "unmapped_channel") {
+      return Response.json(
+        { ok: false, error: "此 WhatsApp Phone Number ID 尚未於平台註冊或已停用。" },
+        { status: 404, headers: NO_STORE },
+      );
+    }
+    if (reservation.action === "conflict") {
+      return Response.json(
+        { ok: false, retrySafe: false, error: "相同的 idempotencyKey 不可用於不同收件人或訊息內容。" },
+        { status: 409, headers: NO_STORE },
+      );
+    }
+    if (reservation.action === "replay") {
+      const existing = reservation.record;
+      return Response.json(
+        {
+          ok: true,
+          replayed: true,
+          waMessageId: typeof existing.wa_message_id === "string" ? existing.wa_message_id : "",
+          status: typeof existing.status === "string" ? existing.status : "sent",
+          idempotencyKey: rawIdemKey,
+          record: existing,
+        },
+        { status: 200, headers: NO_STORE },
+      );
+    }
+    if (reservation.action === "in_flight") {
+      const existing = reservation.record;
+      return Response.json(
+        {
+          ok: false,
+          replayed: false,
+          retrySafe: false,
+          reconciliationRequired: true,
+          reservationId: typeof existing.id === "string" ? existing.id : "",
+          idempotencyKey: rawIdemKey,
+          error: "相同請求正在發送中或尚待對帳，已攔截重複送出。",
+        },
+        { status: 409, headers: NO_STORE },
+      );
+    }
+    reservedRowId = typeof reservation.record.id === "string" ? reservation.record.id : "";
   } catch (err) {
     return managedFailure(err);
   }
@@ -470,8 +574,27 @@ export async function handleAdminWhatsAppSend(
     graphStatus = res.status;
     graphJson = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   } catch {
+    try {
+      await finalizeFn({
+        id: reservedRowId,
+        status: "failed",
+        error_code: "NETWORK_ERR",
+        error_title: "Graph API Connection Failed",
+        error_message: "無法連線至 Meta WhatsApp Cloud API。",
+        metadata: { graph_version: config.graphVersion },
+      });
+    } catch {
+      // Reserve row stays in 'queued' for manual reconciliation; retrySafe stays false.
+    }
     return Response.json(
-      { ok: false, error: "無法連線至 Meta WhatsApp Cloud API。" },
+      {
+        ok: false,
+        retrySafe: false,
+        reconciliationRequired: true,
+        reservationId: reservedRowId,
+        idempotencyKey: rawIdemKey,
+        error: "無法連線至 Meta WhatsApp Cloud API。",
+      },
       { status: 502, headers: NO_STORE },
     );
   }
@@ -487,7 +610,6 @@ export async function handleAdminWhatsAppSend(
       : null;
   const waMessageId = firstMsg && typeof firstMsg.id === "string" ? firstMsg.id.trim() : "";
 
-  const recordFn = options.record ?? defaultRecordOutbound;
   if (graphStatus < 200 || graphStatus >= 300 || !waMessageId) {
     const errCode = graphErr && graphErr.code != null ? String(graphErr.code) : String(graphStatus || "GRAPH_ERR");
     const errTitle = graphErr && typeof graphErr.type === "string" ? graphErr.type : "Meta Cloud API Error";
@@ -497,14 +619,8 @@ export async function handleAdminWhatsAppSend(
         : "WhatsApp 訊息傳送失敗，請檢查收件人測試白名單、Token 權限及範本設定。";
 
     try {
-      await recordFn({
-        phone_number_id: config.phoneNumberId,
-        waba_id: config.wabaId,
-        wa_message_id: "",
-        peer_wa_id: input.to,
-        message_type: input.type,
-        template_name: input.type === "template" ? input.templateName : "",
-        body_text: input.type === "text" ? input.body : input.bodyText || "",
+      await finalizeFn({
+        id: reservedRowId,
         status: "failed",
         error_code: errCode,
         error_title: errTitle,
@@ -520,35 +636,47 @@ export async function handleAdminWhatsAppSend(
         ok: false,
         error: errMessage,
         errorCode: errCode,
+        reservationId: reservedRowId,
+        idempotencyKey: rawIdemKey,
       },
       { status: graphStatus >= 400 && graphStatus < 500 ? 422 : 502, headers: NO_STORE },
     );
   }
 
   try {
-    const persisted = await recordFn({
-      phone_number_id: config.phoneNumberId,
-      waba_id: config.wabaId,
-      wa_message_id: waMessageId,
-      peer_wa_id: input.to,
-      message_type: input.type,
-      template_name: input.type === "template" ? input.templateName : "",
-      body_text: input.type === "text" ? input.body : input.bodyText || "",
+    const persisted = await finalizeFn({
+      id: reservedRowId,
       status: "sent",
+      wa_message_id: waMessageId,
       metadata: { graph_version: config.graphVersion, messaging_product: "whatsapp" },
     });
 
     return Response.json(
       {
         ok: true,
+        replayed: false,
         waMessageId,
         status: "sent",
+        idempotencyKey: rawIdemKey,
         record: persisted,
       },
       { status: 200, headers: NO_STORE },
     );
-  } catch (err) {
-    return managedFailure(err);
+  } catch {
+    return Response.json(
+      {
+        ok: false,
+        acceptedByMeta: true,
+        persisted: false,
+        reconciliationRequired: true,
+        retrySafe: false,
+        waMessageId,
+        reservationId: reservedRowId,
+        idempotencyKey: rawIdemKey,
+        error: "Meta 已接受並送出訊息，但儲存資料庫紀錄失敗；請勿重試發送，請先進行狀態對帳。",
+      },
+      { status: 503, headers: NO_STORE },
+    );
   }
 }
 
@@ -559,49 +687,59 @@ export async function handleAdminWhatsAppStatus(
     process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() &&
       process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
   );
-  let messages: unknown[] = [];
-  let events: unknown[] = [];
-  if (dbConfigured) {
-    try {
-      const db = serviceDatabase();
-      const [msgsRes, evRes] = await Promise.all([
-        db
-          .from("whatsapp_messages")
-          .select("id,scope,organization_id,phone_number_id,direction,wa_message_id,peer_wa_id,peer_name,message_type,template_name,body_text,status,error_code,error_title,error_message,sent_at,delivered_at,read_at,failed_at,received_at,created_at")
-          .order("created_at", { ascending: false })
-          .limit(30),
-        db
-          .from("whatsapp_status_events")
-          .select("id,whatsapp_message_id,wa_message_id,status,recipient_id,error_code,error_title,error_message,provider_timestamp,created_at")
-          .order("created_at", { ascending: false })
-          .limit(50),
-      ]);
-      if (!msgsRes.error && msgsRes.data) messages = msgsRes.data;
-      if (!evRes.error && evRes.data) events = evRes.data;
-    } catch {
+  if (!dbConfigured) {
+    return Response.json(
+      { ok: false, error: "WhatsApp 資料庫未設定，無法讀取訊息紀錄。" },
+      { status: 503, headers: NO_STORE },
+    );
+  }
+
+  try {
+    const db = serviceDatabase();
+    const [msgsRes, evRes] = await Promise.all([
+      db
+        .from("whatsapp_messages")
+        .select("id,scope,organization_id,phone_number_id,direction,wa_message_id,peer_wa_id,peer_name,message_type,template_name,body_text,status,error_code,error_title,error_message,sent_at,delivered_at,read_at,failed_at,received_at,created_at")
+        .eq("scope", "admin")
+        .order("created_at", { ascending: false })
+        .limit(30),
+      db
+        .from("whatsapp_status_events")
+        .select("id,whatsapp_message_id,wa_message_id,status,recipient_id,error_code,error_title,error_message,provider_timestamp,created_at")
+        .eq("scope", "admin")
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
+    if (msgsRes.error || evRes.error) {
       return Response.json(
-        { ok: false, error: "未能讀取 WhatsApp 紀錄。" },
+        { ok: false, error: "未能讀取 WhatsApp 訊息及狀態紀錄。" },
         { status: 503, headers: NO_STORE },
       );
     }
-  }
 
-  return Response.json(
-    {
-      ok: true,
-      configured: {
-        accessToken: Boolean(config.accessToken),
-        appSecret: Boolean(config.appSecret),
-        verifyToken: Boolean(config.verifyToken),
-        phoneNumberId: config.phoneNumberId || null,
-        wabaId: config.wabaId || null,
-        appId: config.appId || null,
-        businessId: config.businessId || null,
-        graphVersion: config.graphVersion,
+    return Response.json(
+      {
+        ok: true,
+        configured: {
+          integrationMode: "orai_admin_staging_test",
+          accessToken: Boolean(config.accessToken),
+          appSecret: Boolean(config.appSecret),
+          verifyToken: Boolean(config.verifyToken),
+          phoneNumberId: config.phoneNumberId || null,
+          wabaId: config.wabaId || null,
+          appId: config.appId || null,
+          businessId: config.businessId || null,
+          graphVersion: config.graphVersion,
+        },
+        messages: msgsRes.data ?? [],
+        events: evRes.data ?? [],
       },
-      messages,
-      events,
-    },
-    { status: 200, headers: NO_STORE },
-  );
+      { status: 200, headers: NO_STORE },
+    );
+  } catch {
+    return Response.json(
+      { ok: false, error: "未能讀取 WhatsApp 紀錄。" },
+      { status: 503, headers: NO_STORE },
+    );
+  }
 }

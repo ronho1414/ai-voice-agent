@@ -1,5 +1,5 @@
 (function () {
-  var WIDGET_SRC = "https://unpkg.com/@elevenlabs/convai-widget-embed";
+  var WIDGET_SRC = "https://unpkg.com/@elevenlabs/convai-widget-embed@0.28.1/dist/index.js";
   var current = document.currentScript;
   var client = "voicepilot-hq";
   var origin = "";
@@ -8,7 +8,7 @@
     origin = own.origin;
     var named = own.searchParams.get("client");
     if (named && named.trim()) client = named.trim();
-  } catch (error) {
+  } catch {
     return;
   }
   if (!origin) return;
@@ -20,16 +20,21 @@
     tools.navigate_website = function (params) {
       var page = params && params.page;
       var sectionId = params && params.sectionId;
-      if (typeof window.navigateToPage === "function") {
-        window.navigateToPage(page, sectionId ? { sectionId: sectionId } : undefined);
+      if (typeof window.navigateToPage !== "function") {
+        return JSON.stringify({ ok: false, reason: "handler_unavailable" });
       }
-      return "Navigated to " + page;
+      var res = window.navigateToPage(page, sectionId ? { sectionId: sectionId } : undefined);
+      if (res === false || res === null) {
+        return JSON.stringify({ ok: false, reason: "navigation_failed" });
+      }
+      return "Navigated to " + (typeof res === "string" && res ? res : page || "home");
     };
     tools.calculate_plan_cost = function (params) {
-      if (typeof window.calculatePlanCost === "function") {
-        window.calculatePlanCost(params || {});
+      if (typeof window.calculatePlanCost !== "function") {
+        return JSON.stringify({ ok: false, reason: "handler_unavailable" });
       }
-      return "Calculator updated";
+      var res = window.calculatePlanCost(params || {});
+      return res !== undefined ? res : JSON.stringify({ ok: true });
     };
     config.clientTools = tools;
   });

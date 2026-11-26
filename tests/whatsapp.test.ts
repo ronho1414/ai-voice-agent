@@ -155,6 +155,7 @@ before(async () => {
     "20261124160158_managed_agent_requests.sql",
     "20261126023000_message_inbox.sql",
     "20261126140000_whatsapp_cloud_api.sql",
+    "20261126160000_stabilization_audit_fixes.sql",
   ]) {
     const sql = await readFile(
       new URL(`../supabase/migrations/${file}`, import.meta.url),
@@ -241,14 +242,16 @@ before(async () => {
       return Response.json(await runRpc(rpcMatch[1], body.payload));
     }
     if (url.pathname === "/rest/v1/whatsapp_messages") {
+      const scopeFilter = url.searchParams.get("scope") === "eq.admin" ? "where scope = 'admin'" : "";
       const { rows } = await db.query(
-        "select id,scope,organization_id,phone_number_id,direction,wa_message_id,peer_wa_id,peer_name,message_type,template_name,body_text,status,error_code,error_title,error_message,sent_at,delivered_at,read_at,failed_at,received_at,created_at from public.whatsapp_messages order by created_at desc limit 30",
+        `select id,scope,organization_id,phone_number_id,direction,wa_message_id,peer_wa_id,peer_name,message_type,template_name,body_text,status,error_code,error_title,error_message,sent_at,delivered_at,read_at,failed_at,received_at,created_at from public.whatsapp_messages ${scopeFilter} order by created_at desc limit 30`,
       );
       return Response.json(rows);
     }
     if (url.pathname === "/rest/v1/whatsapp_status_events") {
+      const scopeFilter = url.searchParams.get("scope") === "eq.admin" ? "where scope = 'admin'" : "";
       const { rows } = await db.query(
-        "select id,whatsapp_message_id,wa_message_id,status,recipient_id,error_code,error_title,error_message,provider_timestamp,created_at from public.whatsapp_status_events order by created_at desc limit 50",
+        `select id,whatsapp_message_id,wa_message_id,status,recipient_id,error_code,error_title,error_message,provider_timestamp,created_at from public.whatsapp_status_events ${scopeFilter} order by created_at desc limit 50`,
       );
       return Response.json(rows);
     }
@@ -256,10 +259,11 @@ before(async () => {
       assert.equal(url.pathname, `/v25.0/${phoneNumberId}/messages`);
       assert.equal(headers.get("authorization"), `Bearer ${fakeAccessToken}`);
       const reqBody = JSON.parse(String(options?.body));
+      const suffix = reqBody.type === "text" ? "text_002" : "send_002";
       return Response.json({
         messaging_product: "whatsapp",
         contacts: [{ input: reqBody.to, wa_id: reqBody.to }],
-        messages: [{ id: "wamid.fictional_stage_send_001" }],
+        messages: [{ id: `wamid.fictional_stage_${suffix}` }],
       });
     }
 
@@ -493,11 +497,17 @@ test("admin WhatsApp send endpoint enforces RBAC, CSRF, sends template v25.0, an
     403,
   );
 
-  // Authorized super_admin template send hits Graph v25.0 and persists
+  // Authorized super_admin template send hits Graph v25.0 and persists with idempotency
+  const idemKey = "wa-idem-test-001";
   const sendRes = await adminWhatsAppPost(
     new Request(`${base}/api/platform/admin/whatsapp/send`, {
       method: "POST",
-      headers: { origin: base, cookie: adminCookie, "Content-Type": "application/json" },
+      headers: {
+        origin: base,
+        cookie: adminCookie,
+        "x-idempotency-key": idemKey,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         to: "+852 9123 4567",
         type: "template",
@@ -509,17 +519,135 @@ test("admin WhatsApp send endpoint enforces RBAC, CSRF, sends template v25.0, an
   assert.equal(sendRes.status, 200);
   const sendBody = await sendRes.json();
   assert.equal(sendBody.ok, true);
-  assert.equal(sendBody.waMessageId, "wamid.fictional_stage_send_001");
+  assert.equal(sendBody.replayed, false);
+  assert.equal(sendBody.waMessageId, "wamid.fictional_stage_send_002");
+
+  // Replaying same idempotencyKey returns cached result WITHOUT calling Meta again
+  const replayRes = await adminWhatsAppPost(
+    new Request(`${base}/api/platform/admin/whatsapp/send`, {
+      method: "POST",
+      headers: {
+        origin: base,
+        cookie: adminCookie,
+        "x-idempotency-key": idemKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to: "+852 9123 4567",
+        type: "template",
+        templateName: "hello_world",
+        languageCode: "en_US",
+      }),
+    }),
+  );
+  assert.equal(replayRes.status, 200);
+  assert.equal((await replayRes.json()).replayed, true);
+
+  // Reusing same idempotencyKey with different recipient/body rejects 409
+  const conflictRes = await adminWhatsAppPost(
+    new Request(`${base}/api/platform/admin/whatsapp/send`, {
+      method: "POST",
+      headers: {
+        origin: base,
+        cookie: adminCookie,
+        "x-idempotency-key": idemKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to: "+852 9888 7777",
+        type: "template",
+        templateName: "hello_world",
+        languageCode: "en_US",
+      }),
+    }),
+  );
+  assert.equal(conflictRes.status, 409);
+
+  // If Meta ACCEPTS (wamid returned) but DB finalize fails, surface reconciliation metadata cleanly (never silent retry)
+  const partialFailRes = await handleAdminWhatsAppSend(
+    new Request(`${base}/api/platform/admin/whatsapp/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-idempotency-key": "wa-reconcile-001" },
+      body: JSON.stringify({ to: "85291234567", type: "template", templateName: "hello_world" }),
+    }),
+    {
+      finalize: async () => {
+        throw new Error("Simulated post-send DB failure");
+      },
+    },
+  );
+  assert.equal(partialFailRes.status, 503);
+  const partialFailBody = await partialFailRes.json();
+  assert.equal(partialFailBody.acceptedByMeta, true);
+  assert.equal(partialFailBody.persisted, false);
+  assert.equal(partialFailBody.reconciliationRequired, true);
+  assert.equal(partialFailBody.retrySafe, false);
+  assert.equal(partialFailBody.waMessageId, "wamid.fictional_stage_send_002");
+
+  // Re-submitting same idempotencyKey while unconfirmed in 'queued' blocks duplicate send (409)
+  const dupWhileQueued = await adminWhatsAppPost(
+    new Request(`${base}/api/platform/admin/whatsapp/send`, {
+      method: "POST",
+      headers: {
+        origin: base,
+        cookie: adminCookie,
+        "x-idempotency-key": "wa-reconcile-001",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ to: "85291234567", type: "template", templateName: "hello_world" }),
+    }),
+  );
+  assert.equal(dupWhileQueued.status, 409);
+  assert.equal((await dupWhileQueued.json()).reconciliationRequired, true);
 
   // Status endpoint never returns secrets
   const statusRes = await adminWhatsAppGet(
     new Request(`${base}/api/platform/admin/whatsapp/send`, { headers: { cookie: adminCookie } }),
   );
   assert.equal(statusRes.status, 200);
-  const statusText = await statusRes.text();
+  const statusBody = await statusRes.json();
+  assert.equal(statusBody.configured.integrationMode, "orai_admin_staging_test");
+  const statusText = JSON.stringify(statusBody);
   assert.equal(statusText.includes(fakeAccessToken), false);
   assert.equal(statusText.includes(fakeAppSecret), false);
   assert.equal(statusText.includes(fakeVerifyToken), false);
+
+  // Status endpoint fails closed 503 when DB is missing (never empty 200)
+  const { handleAdminWhatsAppStatus } = await import("../lib/platform/whatsapp");
+  const savedSupaUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  try {
+    const missingDbStatus = await handleAdminWhatsAppStatus();
+    assert.equal(missingDbStatus.status, 503);
+    assert.equal((await missingDbStatus.json()).ok, false);
+  } finally {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = savedSupaUrl;
+  }
+
+  // Unmapped phone_number_id in webhook is ignored (not dumped into admin)
+  const unmappedParsed = parseWhatsAppWebhookPayload({
+    object: "whatsapp_business_account",
+    entry: [
+      {
+        id: wabaId,
+        changes: [
+          {
+            field: "messages",
+            value: {
+              metadata: { phone_number_id: "5555555555555555" },
+              messages: [{ from: "85299998888", id: "wamid.rogue", timestamp: "1764160099", type: "text", text: { body: "rogue" } }],
+            },
+          },
+        ],
+      },
+    ],
+  });
+  const unmappedRes = await runRpc<{ unmapped_ignored: number; messages_processed: number }>(
+    "ingest_whatsapp_webhook",
+    unmappedParsed,
+  );
+  assert.equal(unmappedRes.unmapped_ignored, 1);
+  assert.equal(unmappedRes.messages_processed, 0);
 
   // Meta error never leaks access token
   const errSendRes = await handleAdminWhatsAppSend(

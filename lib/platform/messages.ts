@@ -141,9 +141,74 @@ export function normalizeChannel(value: unknown): MessageChannel {
   if (typeof value !== "string") return "web";
   const clean = value.trim().toLowerCase();
   if (clean === "phone" || clean === "whatsapp" || clean === "web") return clean;
-  if (clean.includes("phone") || clean.includes("twilio") || clean.includes("sip")) return "phone";
-  if (clean.includes("whatsapp")) return "whatsapp";
+  if (clean.includes("whatsapp") || clean === "wa") return "whatsapp";
+  if (
+    clean.includes("phone") ||
+    clean.includes("twilio") ||
+    clean.includes("sip") ||
+    clean.includes("telephony")
+  ) {
+    return "phone";
+  }
   return "web";
+}
+
+export function stripTemplatePlaceholder(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (/^\{\{[\s\S]*\}\}$/.test(trimmed)) return "";
+  if (["null", "undefined", "none", "n/a", "na", "anonymous", "unknown"].includes(trimmed.toLowerCase())) {
+    return "";
+  }
+  return trimmed;
+}
+
+export function detectElevenLabsChannel(params: {
+  rawChannelHeader?: string | null;
+  callerHeader?: string | null;
+  calledNumberHeader?: string | null;
+  knownWhatsAppPhoneIds?: string[];
+}): { channel: MessageChannel; callerId: string; calledNumber: string } {
+  const cleanChannelHeader = stripTemplatePlaceholder(params.rawChannelHeader ?? "");
+  const callerId = stripTemplatePlaceholder(params.callerHeader ?? "");
+  const calledNumber = stripTemplatePlaceholder(params.calledNumberHeader ?? "");
+
+  if (cleanChannelHeader) {
+    return {
+      channel: normalizeChannel(cleanChannelHeader),
+      callerId,
+      calledNumber,
+    };
+  }
+
+  const normalizedCalledDigits = calledNumber.replace(/[^0-9]/g, "");
+  const isKnownWaPhoneId = Boolean(
+    normalizedCalledDigits &&
+      (params.knownWhatsAppPhoneIds ?? []).some(
+        (id) => id && id.replace(/[^0-9]/g, "") === normalizedCalledDigits,
+      ),
+  );
+  // ElevenLabs WhatsApp maps {{system__called_number}} to the numeric Meta Phone Number ID (typically 13-20 digits without '+')
+  const looksLikeMetaPhoneNumberId =
+    !calledNumber.startsWith("+") && /^[0-9]{13,20}$/.test(calledNumber);
+
+  if (
+    /^whatsapp:/i.test(callerId) ||
+    /^whatsapp:/i.test(calledNumber) ||
+    isKnownWaPhoneId ||
+    looksLikeMetaPhoneNumberId
+  ) {
+    return { channel: "whatsapp", callerId, calledNumber };
+  }
+
+  const compactCaller = callerId.replace(/[\s()-]/g, "");
+  const compactCalled = calledNumber.replace(/[\s()-]/g, "");
+  if (/^\+?[0-9]{6,20}$/.test(compactCaller) || /^\+?[0-9]{6,20}$/.test(compactCalled)) {
+    return { channel: "phone", callerId, calledNumber };
+  }
+
+  return { channel: "web", callerId, calledNumber };
 }
 
 function cleanText(value: unknown, maxLen: number, fieldName: string, required = false): string {

@@ -1163,3 +1163,43 @@ test("authenticated dashboard routes enforce RBAC, CSRF, status/note lifecycle, 
   );
   assert.equal(markReadRes.status, 200);
 });
+
+test("multi-channel detection distinguishes web placeholders, WhatsApp IDs, and phone callers cleanly", async () => {
+  const { detectElevenLabsChannel } = await import("../lib/platform/messages");
+
+  // Uninterpolated ElevenLabs template placeholder on web must stay "web", never "phone"
+  assert.equal(
+    detectElevenLabsChannel({
+      callerHeader: "{{system__caller_id}}",
+      calledNumberHeader: "{{system__called_number}}",
+    }).channel,
+    "web",
+  );
+
+  // WhatsApp numeric Meta Phone Number ID in calledNumber classifies as "whatsapp" even without x-elevenlabs-channel
+  assert.equal(
+    detectElevenLabsChannel({
+      callerHeader: "85291234567",
+      calledNumberHeader: "1465505606651153",
+      knownWhatsAppPhoneIds: ["1465505606651153"],
+    }).channel,
+    "whatsapp",
+  );
+
+  // whatsapp: prefix classifies as "whatsapp"
+  assert.equal(
+    detectElevenLabsChannel({
+      callerHeader: "whatsapp:+85291234567",
+    }).channel,
+    "whatsapp",
+  );
+
+  // Standard telephone E.164 caller without WhatsApp indicators classifies as "phone"
+  assert.equal(
+    detectElevenLabsChannel({
+      callerHeader: "+852 9123 4567",
+      calledNumberHeader: "+852 3000 1234",
+    }).channel,
+    "phone",
+  );
+});

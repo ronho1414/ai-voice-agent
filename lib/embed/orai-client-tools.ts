@@ -177,6 +177,67 @@ function typeIntoInput(field: HTMLElement | null, text: unknown, win: Window): P
   });
 }
 
+export function validatePhoneInput(raw: string): {
+  valid: boolean;
+  normalized: string;
+  error?: string;
+} {
+  const trimmed = raw.trim();
+  if (!trimmed) return { valid: false, normalized: "", error: "電話號碼不能為空。" };
+  if (trimmed.includes("@") || /[A-Za-z]/.test(trimmed)) {
+    return { valid: false, normalized: "", error: "請提供有效的聯絡電話或 WhatsApp 號碼（純數字，不可為文字或電郵）。" };
+  }
+  if (!/^\+?[\d\s()-]{6,32}$/.test(trimmed)) {
+    return { valid: false, normalized: "", error: "電話號碼包含無效字元。" };
+  }
+  const hasPlus = trimmed.startsWith("+");
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length < 8 || digits.length > 15) {
+    return { valid: false, normalized: "", error: "電話號碼需為 8 至 15 位有效數字。" };
+  }
+  if (!hasPlus && digits.length === 8 && !/^[2-9]/.test(digits)) {
+    return { valid: false, normalized: "", error: "香港本地 8 位電話號碼需以 2 至 9 開頭。" };
+  }
+  return { valid: true, normalized: hasPlus ? `+${digits}` : digits };
+}
+
+export function validateWebsiteUrlInput(raw: string): {
+  valid: boolean;
+  normalized: string;
+  error?: string;
+} {
+  const trimmed = raw.trim();
+  if (!trimmed) return { valid: false, normalized: "", error: "網站網址不能為空。" };
+  if (/\s/.test(trimmed)) {
+    return { valid: false, normalized: "", error: "網站網址不可包含空格。" };
+  }
+  if (/^mailto:/i.test(trimmed) || (!/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) && trimmed.includes("@"))) {
+    return { valid: false, normalized: "", error: "請提供公司網站網址，而非電郵地址。" };
+  }
+  if (/^(javascript|data|vbscript|file):/i.test(trimmed)) {
+    return { valid: false, normalized: "", error: "不支援此網址協定，請使用 http:// 或 https:// 網址。" };
+  }
+
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return { valid: false, normalized: "", error: "網站網址格式不正確，例如 https://www.yourcompany.hk。" };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { valid: false, normalized: "", error: "僅支援 http:// 或 https:// 網站網址。" };
+  }
+  const host = parsed.hostname;
+  if (!host || !host.includes(".") || host.startsWith(".") || host.endsWith(".") || !/^[a-z0-9.-]+$/i.test(host)) {
+    return { valid: false, normalized: "", error: "請輸入包含有效網域（Domain）的網站網址。" };
+  }
+  return {
+    valid: true,
+    normalized: /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : candidate,
+  };
+}
+
 function getAddonCheckboxes(doc: Document): HTMLInputElement[] {
   const scoped = doc.querySelectorAll<HTMLInputElement>(
     '#demo-booking-form input[name="interest-feature"], #lead-form input[name="interest-feature"]',
@@ -185,42 +246,51 @@ function getAddonCheckboxes(doc: Document): HTMLInputElement[] {
   return Array.from(doc.querySelectorAll<HTMLInputElement>('input[name="interest-feature"]'));
 }
 
-function syncAddonBanner(doc: Document, boxes: HTMLInputElement[], fallbackLabels: string[]): string[] {
+function syncAddonBanner(doc: Document, boxes: HTMLInputElement[]): string[] {
   const checkedLabels = boxes
     .filter((box) => box.checked && box.value)
     .map((box) => box.value);
-  const labels = checkedLabels.length > 0 ? checkedLabels : fallbackLabels;
   const bannerEl = doc.getElementById("selected-addon-banner");
   const bannerTextEl = doc.getElementById("selected-addon-banner-text");
-  if (bannerEl && bannerTextEl && labels.length > 0) {
-    bannerTextEl.textContent = `✓ 已為你勾選：${labels.join("、")}`;
-    bannerEl.classList.remove("hidden");
-    bannerEl.classList.add("flex");
+  if (bannerEl && bannerTextEl) {
+    if (checkedLabels.length > 0) {
+      bannerTextEl.textContent = `✓ 已為你勾選：${checkedLabels.join("、")}`;
+      bannerEl.classList.remove("hidden");
+      bannerEl.classList.add("flex");
+    } else {
+      bannerTextEl.textContent = "";
+      bannerEl.classList.add("hidden");
+      bannerEl.classList.remove("flex");
+    }
   }
   return checkedLabels;
 }
 
-function applyAddons(doc: Document, tokens: string[]): { newlyChecked: number; checkedLabels: string[] } {
+function applyAddons(
+  doc: Document,
+  tokens: string[],
+): { matchedBoxes: number; newlyChecked: number; checkedLabels: string[] } {
   const boxes = getAddonCheckboxes(doc);
   if (!tokens.length) {
     return {
+      matchedBoxes: 0,
       newlyChecked: 0,
-      checkedLabels: boxes.filter((box) => box.checked && box.value).map((box) => box.value),
+      checkedLabels: syncAddonBanner(doc, boxes),
     };
   }
+  let matchedBoxes = 0;
   let newlyChecked = 0;
-  const fallbackLabels: string[] = [];
   tokens.forEach((token) => {
     boxes.forEach((box) => {
-      if (!addonMatches(box, token) || box.checked) return;
+      if (!addonMatches(box, token)) return;
+      matchedBoxes += 1;
+      if (box.checked) return;
       box.checked = true;
       newlyChecked += 1;
       pokeField(box);
     });
-    const label = ADDON_LABELS[token.toLowerCase()] || token;
-    if (!fallbackLabels.includes(label)) fallbackLabels.push(label);
   });
-  return { newlyChecked, checkedLabels: syncAddonBanner(doc, boxes, fallbackLabels) };
+  return { matchedBoxes, newlyChecked, checkedLabels: syncAddonBanner(doc, boxes) };
 }
 
 function showCalcVoiceBar(doc: Document, message: string): void {
@@ -250,27 +320,82 @@ function readInputValue(doc: Document, id: string): string {
  */
 export function installHomepageActionHandlers(doc: Document, win: OraiWindow): void {
   win.calculatePlanCost = (params = {}) => {
-    const minutes = toNumberOrNull(
-      firstValue(params, ["minutes", "monthlyMinutes", "monthly_minutes"]),
-    );
-    const avg = toNumberOrNull(
-      firstValue(params, ["avgMinutesPerCall", "avg_minutes_per_call", "avgMinutes", "avg_minutes"]),
-    );
+    const rawMinutes = firstValue(params, ["minutes", "monthlyMinutes", "monthly_minutes"]);
+    const rawAvg = firstValue(params, [
+      "avgMinutesPerCall",
+      "avg_minutes_per_call",
+      "avgMinutes",
+      "avg_minutes",
+    ]);
+    const minutes = toNumberOrNull(rawMinutes);
+    const avg = toNumberOrNull(rawAvg);
+
+    const validationErrors: Record<string, string> = {};
+    if (rawMinutes !== "" && (minutes == null || minutes <= 0)) {
+      validationErrors.minutes = "每月通話分鐘數必須為大於 0 的數字。";
+    }
+    if (rawAvg !== "" && (avg == null || avg <= 0 || avg > 60)) {
+      validationErrors.avgMinutesPerCall = "平均每通電話分鐘數必須介乎 1 至 60 分鐘。";
+    }
+    if (Object.keys(validationErrors).length > 0) {
+      return Promise.resolve(
+        JSON.stringify({
+          ok: false,
+          reason: "validation_error",
+          validationErrors,
+        }),
+      );
+    }
+
+    if (typeof win.navigateToPage !== "function") {
+      return Promise.resolve(
+        JSON.stringify({
+          ok: false,
+          reason: "handler_unavailable",
+          calculatorPresent: Boolean(doc.getElementById("calc-minutes-input")),
+        }),
+      );
+    }
+
     const sectionTarget = doc.getElementById("plan-cost-calculator") ? "plan-cost-calculator" : "pricing";
-    win.navigateToPage?.("pricing", { sectionId: sectionTarget });
+    const navResult: unknown = (win.navigateToPage as (page: string, opts?: NavigateOptions) => unknown)(
+      "pricing",
+      { sectionId: sectionTarget },
+    );
+    if (navResult === false || navResult === null) {
+      return Promise.resolve(
+        JSON.stringify({
+          ok: false,
+          reason: "navigation_failed",
+          navigatedTo: null,
+          calculatorPresent: Boolean(doc.getElementById("calc-minutes-input")),
+        }),
+      );
+    }
+
     showCalcVoiceBar(doc, "Orai service 正在為你自動填入通話分鐘並即時試算...");
     return wait(90, win).then(async () => {
-      if (minutes != null) {
-        await typeIntoInput(doc.getElementById("calc-minutes-input"), toText(minutes), win);
+      const minsInput = doc.getElementById("calc-minutes-input");
+      const avgInput = doc.getElementById("calc-avg-mins-input");
+      if (!minsInput) {
+        return JSON.stringify({
+          ok: false,
+          reason: "calculator_missing",
+          navigatedTo: "pricing",
+          calculatorPresent: false,
+        });
       }
-      if (avg != null) {
-        await typeIntoInput(doc.getElementById("calc-avg-mins-input"), toText(avg), win);
+      if (minutes != null) {
+        await typeIntoInput(minsInput, toText(minutes), win);
+      }
+      if (avg != null && avgInput) {
+        await typeIntoInput(avgInput, toText(avg), win);
       }
       showCalcVoiceBar(doc, "已完成用量試算。具體專案報價歡迎預約免費評估。");
       return JSON.stringify({
         ok: true,
         navigatedTo: "pricing",
-        calculatorPresent: Boolean(doc.getElementById("calc-minutes-input")),
+        calculatorPresent: true,
       });
     });
   };
@@ -281,34 +406,72 @@ export function installHomepageActionHandlers(doc: Document, win: OraiWindow): v
       const person = toText(
         firstValue(params, ["contactPerson", "contactName", "name", "person", "contact_person", "contact_name"]),
       );
-      const phone = toText(firstValue(params, ["contactPhone", "phone", "whatsapp", "contact_phone"]));
-      const website = toText(firstValue(params, ["websiteUrl", "website", "url", "website_url"]));
+      const rawPhone = toText(firstValue(params, ["contactPhone", "phone", "whatsapp", "contact_phone"]));
+      const rawWebsite = toText(firstValue(params, ["websiteUrl", "website", "url", "website_url"]));
       const sample = toOptionalFlag(
         firstValue(params, ["requestVoiceSample", "request_voice_sample", "voiceSample", "voice_sample"]),
       );
       const selectedPlan = toText(firstValue(params, ["selectedPlan", "selected_plan", "plan"]));
       const tokens = addonTokens(params);
 
-      win.navigateToPage?.("home", { sectionId: "demo-booking-form" });
+      if (typeof win.navigateToPage === "function") {
+        win.navigateToPage("home", { sectionId: "demo-booking-form" });
+      }
       showLeadForm(doc);
       await wait(90, win);
 
+      const companyEl = doc.getElementById("company-name");
+      const personEl = doc.getElementById("contact-person");
+      const phoneEl = doc.getElementById("contact-phone");
+      const websiteEl = doc.getElementById("website-url");
+      if (!companyEl && !personEl && !phoneEl && !websiteEl) {
+        return JSON.stringify({
+          ok: false,
+          reason: "form_elements_missing",
+          submitted: false,
+        });
+      }
+
+      const validationErrors: Record<string, string> = {};
+      let validPhone = "";
+      if (rawPhone) {
+        const phoneCheck = validatePhoneInput(rawPhone);
+        if (phoneCheck.valid) {
+          validPhone = phoneCheck.normalized;
+        } else if (phoneCheck.error) {
+          validationErrors.contactPhone = phoneCheck.error;
+        }
+      }
+
+      let validWebsite = "";
+      if (rawWebsite) {
+        const siteCheck = validateWebsiteUrlInput(rawWebsite);
+        if (siteCheck.valid) {
+          validWebsite = siteCheck.normalized;
+        } else if (siteCheck.error) {
+          validationErrors.websiteUrl = siteCheck.error;
+        }
+      }
+
       const updatedFields: string[] = [];
-      if (company && (await typeIntoInput(doc.getElementById("company-name"), company, win))) {
+      if (company && (await typeIntoInput(companyEl, company, win))) {
         updatedFields.push("companyName");
       }
-      if (person && (await typeIntoInput(doc.getElementById("contact-person"), person, win))) {
+      if (person && (await typeIntoInput(personEl, person, win))) {
         updatedFields.push("contactPerson");
       }
-      if (phone && (await typeIntoInput(doc.getElementById("contact-phone"), phone, win))) {
+      if (validPhone && (await typeIntoInput(phoneEl, validPhone, win))) {
         updatedFields.push("contactPhone");
       }
-      if (website && (await typeIntoInput(doc.getElementById("website-url"), website, win))) {
+      if (validWebsite && (await typeIntoInput(websiteEl, validWebsite, win))) {
         updatedFields.push("websiteUrl");
       }
 
-      const { newlyChecked, checkedLabels } = applyAddons(doc, tokens);
+      const { matchedBoxes, newlyChecked, checkedLabels } = applyAddons(doc, tokens);
       if (newlyChecked > 0) updatedFields.push("addons");
+      if (tokens.length > 0 && matchedBoxes === 0) {
+        validationErrors.addons = "未能配對所指定的擴充模組名稱，原有勾選狀態維持不變。";
+      }
 
       const sampleBox = doc.getElementById("request-voice-sample") as HTMLInputElement | null;
       if (sampleBox && sample != null && sampleBox.checked !== sample) {
@@ -335,17 +498,24 @@ export function installHomepageActionHandlers(doc: Document, win: OraiWindow): v
       const ignoredFields: string[] = [];
       if (selectedPlan) ignoredFields.push("selectedPlan");
 
+      const hasValidationErrors = Object.keys(validationErrors).length > 0;
+      const status = hasValidationErrors
+        ? updatedFields.length > 0
+          ? "partial_with_validation_errors"
+          : "validation_error"
+        : missingRequiredForSubmit.length === 0
+          ? "ready_for_user_submit"
+          : updatedFields.length > 0
+            ? "partial"
+            : "no_fields_updated";
+
       return JSON.stringify({
-        ok: true,
-        status:
-          missingRequiredForSubmit.length === 0
-            ? "ready_for_user_submit"
-            : updatedFields.length > 0
-              ? "partial"
-              : "no_fields_updated",
+        ok: !hasValidationErrors,
+        status,
         updatedFields,
         currentState,
         missingFields: missingRequiredForSubmit,
+        ...(hasValidationErrors ? { validationErrors } : {}),
         ...(ignoredFields.length > 0 ? { unsupportedFields: ignoredFields } : {}),
         submitted: false,
       });
@@ -407,11 +577,40 @@ function resolveNavigateTarget(params: Record<string, unknown>): {
  * Creates the ElevenLabs Client Tools map mirroring the official `elevenlabs-convai:call`
  * integration pattern while delegating execution to Orai's homepage handlers.
  */
-export function buildHomepageClientTools(win: OraiWindow): Record<string, ClientToolFn> {
+export function buildHomepageClientTools(
+  win: OraiWindow,
+  doc?: Pick<Document, "getElementById">,
+): Record<string, ClientToolFn> {
   return {
     navigate_website: (params = {}) => {
+      if (typeof win.navigateToPage !== "function") {
+        return JSON.stringify({ ok: false, reason: "handler_unavailable" });
+      }
       const { page, options } = resolveNavigateTarget(params);
-      win.navigateToPage?.(page, Object.keys(options).length ? options : undefined);
+      if (doc) {
+        if (!doc.getElementById(`page-${page}`)) {
+          return JSON.stringify({ ok: false, reason: "target_not_found", page });
+        }
+        if (options.sectionId && !doc.getElementById(options.sectionId)) {
+          return JSON.stringify({
+            ok: false,
+            reason: "target_not_found",
+            page,
+            sectionId: options.sectionId,
+          });
+        }
+      }
+      const res: unknown = (win.navigateToPage as (page: string, opts?: NavigateOptions) => unknown)(
+        page,
+        Object.keys(options).length ? options : undefined,
+      );
+      if (
+        res === false ||
+        res === null ||
+        (typeof res === "object" && res !== null && (res as { ok?: boolean }).ok === false)
+      ) {
+        return JSON.stringify({ ok: false, reason: "navigation_failed", page });
+      }
       return `Navigated to ${page}`;
     },
     calculate_plan_cost: (params = {}) => {

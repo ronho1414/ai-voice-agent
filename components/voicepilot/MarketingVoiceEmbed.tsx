@@ -11,7 +11,9 @@ import {
 
 export const OFFICIAL_ELEVENLABS_AGENT_ID = "agent_8201m7sbetj3e36s1a2nv3fgcqna";
 export const OFFICIAL_WIDGET_DEFAULT_LANGUAGE = "yue";
-export const OFFICIAL_WIDGET_SCRIPT_SRC = "https://unpkg.com/@elevenlabs/convai-widget-embed";
+export const OFFICIAL_WIDGET_VERSION = "0.28.1";
+export const OFFICIAL_WIDGET_SCRIPT_SRC = `https://unpkg.com/@elevenlabs/convai-widget-embed@${OFFICIAL_WIDGET_VERSION}/dist/index.js`;
+export const OFFICIAL_WIDGET_LEGACY_SCRIPT_SRC = "https://unpkg.com/@elevenlabs/convai-widget-embed";
 export const OFFICIAL_WIDGET_SCRIPT_ATTR = "data-elevenlabs-convai-embed";
 export const OFFICIAL_WIDGET_HOST_ATTR = "data-orai-official-widget-host";
 
@@ -48,7 +50,7 @@ export function patchCantoneseLanguageEntry(code: string): string {
 
 export function findOfficialWidgetScript(doc: Document): HTMLScriptElement | null {
   return doc.querySelector<HTMLScriptElement>(
-    `script[src="${OFFICIAL_WIDGET_SCRIPT_SRC}"], script[${OFFICIAL_WIDGET_SCRIPT_ATTR}="true"]`,
+    `script[src="${OFFICIAL_WIDGET_SCRIPT_SRC}"], script[src="${OFFICIAL_WIDGET_LEGACY_SCRIPT_SRC}"], script[${OFFICIAL_WIDGET_SCRIPT_ATTR}="true"]`,
   );
 }
 
@@ -56,6 +58,7 @@ function appendOfficialScript(
   doc: Document,
   src: string,
   onSettled?: () => void,
+  onBlobError?: () => void,
 ): HTMLScriptElement | null {
   const target = doc.body ?? doc.head ?? doc.documentElement;
   if (!target) return null;
@@ -65,9 +68,19 @@ function appendOfficialScript(
   script.async = true;
   script.type = "text/javascript";
   script.setAttribute(OFFICIAL_WIDGET_SCRIPT_ATTR, "true");
-  if (onSettled && typeof script.addEventListener === "function") {
-    script.addEventListener("load", onSettled, { once: true });
-    script.addEventListener("error", onSettled, { once: true });
+  if (typeof script.addEventListener === "function") {
+    script.addEventListener("load", () => onSettled?.(), { once: true });
+    script.addEventListener(
+      "error",
+      () => {
+        onSettled?.();
+        if (onBlobError) {
+          script.remove();
+          onBlobError();
+        }
+      },
+      { once: true },
+    );
   }
   target.appendChild(script);
   return script;
@@ -121,7 +134,16 @@ export async function ensureOfficialWidgetScript(
       return null;
     }
 
-    return appendOfficialScript(doc, srcToAppend, revokeBlob);
+    const fallbackDirect =
+      revokeBlob && srcToAppend !== OFFICIAL_WIDGET_SCRIPT_SRC
+        ? () => {
+            if (!findOfficialWidgetScript(doc) && !win?.customElements?.get("elevenlabs-convai")) {
+              appendOfficialScript(doc, OFFICIAL_WIDGET_SCRIPT_SRC);
+            }
+          }
+        : undefined;
+
+    return appendOfficialScript(doc, srcToAppend, revokeBlob, fallbackDirect);
   })().finally(() => {
     inFlightScriptLoads.delete(doc);
   });
@@ -158,7 +180,7 @@ export function MarketingVoiceEmbed() {
     setShouldMountWidget(true);
     installHomepageActionHandlers(document, window as OraiWindow);
     const detachClientTools = attachClientToolsListener(document, () =>
-      buildHomepageClientTools(window as OraiWindow),
+      buildHomepageClientTools(window as OraiWindow, document),
     );
     void ensureOfficialWidgetScript(document, window);
 

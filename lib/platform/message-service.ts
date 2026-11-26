@@ -4,10 +4,10 @@ import { requestSupabase } from "./supabase-auth";
 import type { PlatformSession } from "./types";
 import {
   DEFAULT_MARKETING_AGENT_ID,
+  detectElevenLabsChannel,
   MESSAGE_CATEGORIES,
   MESSAGE_STATUSES,
   MessageInputError,
-  normalizeChannel,
   parseCreateMessageInput,
   readTrustedIdentifier,
   resolveMessageIdempotencyKey,
@@ -192,13 +192,15 @@ export async function handleCreateElevenLabsMessage(
       }
     }
 
-    const rawChannelHeader = request.headers.get("x-elevenlabs-channel");
-    const rawCallerHeader = request.headers.get("x-elevenlabs-caller-id")?.trim() ?? "";
-    const channel = rawChannelHeader
-      ? normalizeChannel(rawChannelHeader)
-      : rawCallerHeader
-        ? "phone"
-        : "web";
+    const knownWaIds = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim()
+      ? [process.env.WHATSAPP_PHONE_NUMBER_ID.trim()]
+      : [];
+    const { channel, calledNumber } = detectElevenLabsChannel({
+      rawChannelHeader: request.headers.get("x-elevenlabs-channel"),
+      callerHeader: request.headers.get("x-elevenlabs-caller-id"),
+      calledNumberHeader: request.headers.get("x-elevenlabs-called-number"),
+      knownWhatsAppPhoneIds: knownWaIds,
+    });
 
     const parsedInput = parseCreateMessageInput(parsedJson);
     const payloadHash = computeMessagePayloadHash(parsedInput, channel);
@@ -224,6 +226,7 @@ export async function handleCreateElevenLabsMessage(
       claimed_provider_agent_id: claimedAgentId,
       marketing_agent_id: marketingAgentId,
       provider_conversation_id: providerConversationId,
+      called_number: calledNumber,
       channel,
       sender_name: parsedInput.senderName,
       contact_phone: parsedInput.contactPhone,

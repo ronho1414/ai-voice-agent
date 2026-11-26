@@ -63,6 +63,12 @@ export type PublicClientConfig = {
   routeMap: RouteMap;
 };
 
+export class ClientConfigServiceError extends Error {
+  constructor(message: string, public readonly status = 503) {
+    super(message);
+  }
+}
+
 type LocalStore = {
   documents: DocumentRecord[];
   notes: NoteRecord[];
@@ -717,7 +723,15 @@ export async function publicClientConfig(slugInput: string): Promise<PublicClien
   } catch {
     return null;
   }
-  const supabase = supabaseAdmin();
+  let supabase: SupabaseClient | null = null;
+  try {
+    supabase = supabaseAdmin();
+  } catch (err) {
+    throw new ClientConfigServiceError(
+      err instanceof Error ? err.message : "Database configuration unavailable",
+      503,
+    );
+  }
   if (!supabase) {
     const store = await readLocal();
     const client = store.clients.find((item) => item.client_slug === slug);
@@ -728,10 +742,11 @@ export async function publicClientConfig(slugInput: string): Promise<PublicClien
     .select("id,client_slug,client_name,elevenlabs_agent_id,route_map,is_active,created_at")
     .eq("client_slug", slug)
     .maybeSingle();
-  if (error || !data) {
-    const store = await readLocal();
-    const client = store.clients.find((item) => item.client_slug === slug);
-    return client ? publicConfig(client) : null;
+  if (error) {
+    throw new ClientConfigServiceError("Client config database unavailable", 503);
+  }
+  if (!data) {
+    return null;
   }
   const client = storedClient(data)[0];
   return client ? publicConfig(client) : null;

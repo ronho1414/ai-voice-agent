@@ -100,7 +100,7 @@ test('new and legacy domains retain strict same-origin mutation protection', () 
 test('official homepage widget renders only on root homepage and avoids legacy /orai-widget.js', () => {
   assert.equal(OFFICIAL_ELEVENLABS_AGENT_ID, 'agent_8201m7sbetj3e36s1a2nv3fgcqna');
   assert.equal(OFFICIAL_WIDGET_DEFAULT_LANGUAGE, 'yue');
-  assert.equal(OFFICIAL_WIDGET_SCRIPT_SRC, 'https://unpkg.com/@elevenlabs/convai-widget-embed');
+  assert.equal(OFFICIAL_WIDGET_SCRIPT_SRC, 'https://unpkg.com/@elevenlabs/convai-widget-embed@0.28.1/dist/index.js');
   assert.equal(shouldRenderOfficialWidget('/'), true);
   for (const path of ['/admin', '/dashboard', '/beauty', '/pricing', '/services', '/booking', '', null, undefined]) {
     assert.equal(shouldRenderOfficialWidget(path), false);
@@ -352,4 +352,119 @@ test('homepage ElevenLabs client tools attach, preserve existing tools, and dele
     (values.get('selected-addon-banner-text') as unknown as { textContent: string }).textContent,
     '✓ 已為你勾選：網頁自動跳轉導航、CRM / 預約系統雙向 API 串接',
   );
+});
+
+test('audit regressions: client-config fails closed, tool handlers validate targets & inputs, and addon banner stays synced', async () => {
+  const { GET: clientConfigGet } = await import('../app/api/client-config/route');
+  const {
+    buildHomepageClientTools,
+    installHomepageActionHandlers,
+    validatePhoneInput,
+    validateWebsiteUrlInput,
+  } = await import('../lib/embed/orai-client-tools');
+  const { OFFICIAL_WIDGET_SCRIPT_SRC, OFFICIAL_WIDGET_VERSION } = await import('../components/voicepilot/MarketingVoiceEmbed');
+
+  // 1) Finding 1: publicClientConfig & /api/client-config return 404 for missing and 503 for DB failure in production
+  const prevEnv = { ...process.env };
+  const prevFetch = globalThis.fetch;
+  try {
+    Object.assign(process.env, { NODE_ENV: 'production' });
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const missingEnvRes = await clientConfigGet(new Request('https://orai.test/api/client-config?client=merchant-a'));
+    assert.equal(missingEnvRes.status, 503);
+
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://supabase.example.test';
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-key';
+    globalThis.fetch = async () => Response.json({ message: 'DB error' }, { status: 500 });
+    const dbErrRes = await clientConfigGet(new Request('https://orai.test/api/client-config?client=merchant-a'));
+    assert.equal(dbErrRes.status, 503);
+
+    globalThis.fetch = async () => new Response(JSON.stringify(null), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    const notFoundRes = await clientConfigGet(new Request('https://orai.test/api/client-config?client=nonexistent-org'));
+    assert.equal(notFoundRes.status, 404);
+  } finally {
+    globalThis.fetch = prevFetch;
+    for (const k of Object.keys(process.env)) if (!(k in prevEnv)) delete process.env[k];
+    Object.assign(process.env, prevEnv);
+  }
+
+  // 2) Finding 2: navigate_website & calculate_plan_cost never report false success when missing handlers or targets
+  const emptyTools = buildHomepageClientTools({} as unknown as OraiWindow);
+  assert.equal(JSON.parse(String(emptyTools.navigate_website({ page: 'pricing' }))).reason, 'handler_unavailable');
+  assert.equal(JSON.parse(String(emptyTools.calculate_plan_cost({ minutes: 500 }))).reason, 'handler_unavailable');
+
+  const partialDoc = {
+    getElementById: (id: string) => (id === 'page-pricing' ? {} : null),
+    querySelectorAll: () => [],
+  } as unknown as Document;
+  const navWithDoc = buildHomepageClientTools(
+    { navigateToPage: () => 'pricing' } as unknown as OraiWindow,
+    partialDoc,
+  );
+  assert.equal(JSON.parse(String(navWithDoc.navigate_website({ page: 'pricing', sectionId: 'missing-sec' }))).reason, 'target_not_found');
+
+  // 3) Finding 3 & 4: validation preserves existing values + banner hides and never shows unchecked addons
+  assert.equal(validatePhoneInput('+852 9123 4567').valid, true);
+  assert.equal(validatePhoneInput('abc@test.com').valid, false);
+  assert.equal(validateWebsiteUrlInput('foo@bar.com').valid, false);
+  assert.equal(validateWebsiteUrlInput('javascript:alert(1)').valid, false);
+  assert.equal(validateWebsiteUrlInput('www.example.hk').normalized, 'https://www.example.hk');
+
+  const classes = new Map<string, Set<string>>([
+    ['selected-addon-banner', new Set(['flex'])],
+  ]);
+  const fields = new Map<string, { id: string; value: string; checked: boolean; classList: { add(...c: string[]): void; remove(...c: string[]): void; contains(c: string): boolean }; dispatchEvent(): void; focus(): void; textContent: string }>();
+  for (const id of ['company-name', 'contact-person', 'contact-phone', 'website-url', 'lead-form', 'lead-form-success', 'selected-addon-banner', 'selected-addon-banner-text', 'request-voice-sample']) {
+    const set = classes.get(id) ?? new Set<string>();
+    fields.set(id, {
+      id,
+      value: id === 'contact-phone' ? '91234567' : id === 'website-url' ? 'https://valid.hk' : '',
+      checked: false,
+      textContent: id === 'selected-addon-banner-text' ? 'stale text' : '',
+      classList: {
+        add: (...c: string[]) => c.forEach((x) => set.add(x)),
+        remove: (...c: string[]) => c.forEach((x) => set.delete(x)),
+        contains: (c: string) => set.has(c),
+      },
+      dispatchEvent() {},
+      focus() {},
+    });
+  }
+  const addonBox = { id: 'addon-nav', value: '網頁自動跳轉導航', checked: false, dispatchEvent() {} };
+  const stubDoc = {
+    getElementById: (id: string) => fields.get(id) ?? null,
+    querySelectorAll: () => [addonBox],
+  } as unknown as Document;
+  const stubWin = {
+    setTimeout: ((fn: () => void) => { fn(); return 1; }) as unknown as typeof setTimeout,
+    setInterval: globalThis.setInterval,
+    clearInterval: globalThis.clearInterval,
+    matchMedia: () => ({ matches: true } as MediaQueryList),
+    navigateToPage: () => 'home',
+  } as unknown as OraiWindow;
+
+  installHomepageActionHandlers(stubDoc, stubWin);
+  // Missing calculator returns ok: false
+  const calcMissing = JSON.parse(String(await stubWin.calculatePlanCost!({ minutes: 500 })));
+  assert.equal(calcMissing.ok, false);
+  assert.equal(calcMissing.reason, 'calculator_missing');
+
+  // Invalid phone/url & unknown addon preserve existing valid values & hide banner
+  const invalidFill = JSON.parse(String(await stubWin.fillBookingForm!({
+    contactPhone: 'not-a-phone',
+    websiteUrl: 'foo@bar.com',
+    addons: ['unknown_module'],
+  })));
+  assert.equal(invalidFill.ok, false);
+  assert.equal(fields.get('contact-phone')!.value, '91234567');
+  assert.equal(fields.get('website-url')!.value, 'https://valid.hk');
+  assert.ok(invalidFill.validationErrors.contactPhone);
+  assert.ok(invalidFill.validationErrors.websiteUrl);
+  assert.ok(invalidFill.validationErrors.addons);
+  assert.equal(fields.get('selected-addon-banner')!.classList.contains('hidden'), true);
+  assert.equal(fields.get('selected-addon-banner-text')!.textContent, '');
+
+  // 4) Finding 5: pinned CDN version present
+  assert.equal(OFFICIAL_WIDGET_SCRIPT_SRC.includes(`@${OFFICIAL_WIDGET_VERSION}/`), true);
 });

@@ -1,4 +1,4 @@
-import { publicClientConfig } from "@/lib/admin/store";
+import { ClientConfigServiceError, publicClientConfig } from "@/lib/admin/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +15,12 @@ export function OPTIONS(): Response {
 
 export async function GET(request: Request): Promise<Response> {
   const requested = new URL(request.url).searchParams.get("client")?.trim() || "voicepilot-hq";
-  const config = await publicClientConfig(requested);
-  if (!config) return Response.json({ error: "Not found" }, { status: 404, headers: CORS });
-  return Response.json(config, { headers: CORS });
+  try {
+    const config = await publicClientConfig(requested);
+    if (!config) return Response.json({ error: "Not found" }, { status: 404, headers: CORS });
+    return Response.json(config, { headers: CORS });
+  } catch (err) {
+    const status = err instanceof ClientConfigServiceError ? err.status : 503;
+    return Response.json({ error: "Service unavailable" }, { status, headers: CORS });
+  }
 }
