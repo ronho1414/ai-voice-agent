@@ -34,6 +34,7 @@ const userA = "10000000-0000-4000-8000-000000000101";
 const userB = "10000000-0000-4000-8000-000000000102";
 const adminUser = "10000000-0000-4000-8000-000000000103";
 const viewerUser = "10000000-0000-4000-8000-000000000104";
+const oraiOfficialUser = "10000000-0000-4000-8000-000000000105";
 
 const orgA = "20000000-0000-4000-8000-000000000101";
 const orgB = "20000000-0000-4000-8000-000000000102";
@@ -43,10 +44,11 @@ const sessionId = "40000000-0000-4000-8000-000000000101";
 
 const elAgentA = "agent_fictional_tenant_a_01";
 const elAgentB = "agent_fictional_tenant_b_02";
-const elMarketingAgent = "agent_8201m7sbetj3e36s1a2nv3fgcqna";
-const marketingToolSecret = "fictional-stage-marketing-secret-987654";
+const elOraiOfficialAgent = "agent_8201m7sbetj3e36s1a2nv3fgcqna";
+const oraiOfficialToken = "fictional-stage-orai-official-secret-987654";
 const agentAToken = "orai_msg_fictional_tenant_a_token_111111";
 const agentBToken = "orai_msg_fictional_tenant_b_token_222222";
+let orgOraiId = "";
 
 function sha256Hex(value: string) {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -59,6 +61,7 @@ const savedEnv = { ...process.env };
 const fixtures: Record<string, { id: string; role: string; org: string }> = {
   "a@example.test": { id: userA, role: "user", org: orgA },
   "b@example.test": { id: userB, role: "user", org: orgB },
+  "orai-official@example.test": { id: oraiOfficialUser, role: "user", org: "" },
   "admin@example.test": { id: adminUser, role: "super_admin", org: "" },
 };
 const tokens = new Map<string, string>();
@@ -225,6 +228,8 @@ before(async () => {
     grant execute on function auth.jwt(), auth.uid() to authenticated;
   `);
 
+let legacyAdminMsgId = "";
+
   for (const file of [
     "001_multi_tenant_foundation.sql",
     "002_rls_write_hardening.sql",
@@ -235,6 +240,8 @@ before(async () => {
     "20261124103151_immutable_agent_ownership.sql",
     "20261124160158_managed_agent_requests.sql",
     "20261126023000_message_inbox.sql",
+    "20261126140000_whatsapp_cloud_api.sql",
+    "20261126160000_stabilization_audit_fixes.sql",
   ]) {
     const sql = await readFile(
       new URL(`../supabase/migrations/${file}`, import.meta.url),
@@ -244,13 +251,14 @@ before(async () => {
   }
 
   await db.exec(`
-    insert into auth.users(id) values ('${userA}'),('${userB}'),('${adminUser}'),('${viewerUser}');
+    insert into auth.users(id) values ('${userA}'),('${userB}'),('${adminUser}'),('${viewerUser}'),('${oraiOfficialUser}');
     insert into auth.sessions(id,user_id) select '${sessionId}',id from auth.users;
     insert into public.profiles(id,email,full_name,system_role) values
       ('${userA}','a@example.test','Alice Tenant A','user'),
       ('${userB}','b@example.test','Bob Tenant B','user'),
       ('${adminUser}','admin@example.test','Orai Super Admin','super_admin'),
-      ('${viewerUser}','viewer@example.test','Viewer A','user');
+      ('${viewerUser}','viewer@example.test','Viewer A','user'),
+      ('${oraiOfficialUser}','orai-official@example.test','Orai Service Official','user');
     insert into public.organizations(id,name,slug) values
       ('${orgA}','Luxe Glow Spa (Fictional)','luxe-glow-fictional'),
       ('${orgB}','Harbour Dental (Fictional)','harbour-dental-fictional');
@@ -265,12 +273,96 @@ before(async () => {
     select public.set_agent_tool_credential('${agentBId}', '${sha256Hex(agentBToken)}', 'orai_msg_b');
   `);
 
+  // Seed one legacy pre-migration admin-scoped Orai message + event + note + notification
+  await db.exec("set role service_role");
+  try {
+    const legacyMsg = (
+      await db.query<{ id: string }>(
+        `insert into public.messages(
+          inbox_scope, organization_id, agent_id, provider, provider_agent_id,
+          provider_conversation_id, channel, sender_name, recipient_name,
+          message_content, message_summary, category, status, idempotency_key, payload_hash
+        ) values (
+          'admin', null, null, 'elevenlabs', '${elOraiOfficialAgent}',
+          'conv_el_orai_legacy_001', 'phone', '何兆琪（歷史遷移測試）', '何生負責人',
+          '聽日唔嚟啦，下次再約。', '何兆琪通知改約', 'specific_recipient', 'pending',
+          'legacy-orai-001', repeat('b', 64)
+        ) returning id`,
+      )
+    ).rows[0];
+    legacyAdminMsgId = legacyMsg.id;
+
+    const legacyEvent = (
+      await db.query<{ id: string }>(
+        `insert into public.message_events(message_id, inbox_scope, organization_id, actor_label, kind, to_status, detail)
+         values ($1, 'admin', null, 'AI 專員', 'created', 'pending', '歷史事件') returning id`,
+        [legacyAdminMsgId],
+      )
+    ).rows[0];
+
+    await db.query(
+      `insert into public.message_internal_notes(message_id, inbox_scope, organization_id, actor_id, actor_label, note)
+       values ($1, 'admin', null, $2, 'Orai Super Admin', '歷史內部備註保留測試')`,
+      [legacyAdminMsgId, adminUser],
+    );
+
+    await db.query(
+      `insert into public.notifications(recipient_id, kind, message_id, organization_id, title, event_key)
+       values ($1, 'message', $2, null, '新留言 MSG-LEGACY：來自 何兆琪', $3)`,
+      [adminUser, legacyAdminMsgId, `msg:${legacyEvent.id}`],
+    );
+  } finally {
+    await db.exec("reset role");
+  }
+
+  // Apply First-party Tenant migration and run idempotent provisioning + historical backfill RPC
+  const firstPartySql = await readFile(
+    new URL("../supabase/migrations/20261127020000_orai_first_party_tenant.sql", import.meta.url),
+    "utf8",
+  );
+  await db.exec(firstPartySql);
+
+  await db.exec("set role service_role");
+  try {
+    const provRes = (
+      await db.query<{
+        result: {
+          ok: boolean;
+          organization_id: string;
+          migrated_messages: number;
+          migrated_events: number;
+          migrated_internal_notes: number;
+          migrated_notifications: number;
+        };
+      }>("select public.provision_orai_first_party_tenant($1::jsonb) as result", [
+        JSON.stringify({
+          org_name: "Orai Service",
+          org_slug: "orai-service",
+          elevenlabs_agent_id: elOraiOfficialAgent,
+          agent_name: "Orai Service 官方 AI 接待專員",
+          member_profile_id: oraiOfficialUser,
+          secret_hash: sha256Hex(oraiOfficialToken),
+          secret_prefix: "orai_mkt",
+        }),
+      ])
+    ).rows[0].result;
+
+    assert.equal(provRes.ok, true);
+    assert.equal(provRes.migrated_messages, 1);
+    assert.equal(provRes.migrated_events, 1);
+    assert.equal(provRes.migrated_internal_notes, 1);
+    assert.equal(provRes.migrated_notifications, 1);
+    orgOraiId = provRes.organization_id;
+    fixtures["orai-official@example.test"].org = orgOraiId;
+  } finally {
+    await db.exec("reset role");
+  }
+
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test";
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "public-test-key";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-test-key";
-  process.env.ELEVENLABS_MARKETING_TOOL_SECRET = marketingToolSecret;
+  delete process.env.ELEVENLABS_MARKETING_TOOL_SECRET;
   delete process.env.ELEVENLABS_SERVER_TOOL_SECRET;
-  process.env.ORAI_MARKETING_AGENT_ID = elMarketingAgent;
 
   globalThis.fetch = async (input, options) => {
     const url = new URL(
@@ -469,14 +561,12 @@ test("ElevenLabs server tool enforces agent-scoped credentials, blocks agent imp
   const prevMkt = process.env.ELEVENLABS_MARKETING_TOOL_SECRET;
   delete process.env.NEXT_PUBLIC_SUPABASE_URL;
   delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-  delete process.env.ELEVENLABS_MARKETING_TOOL_SECRET;
   try {
     const noSecretRes = await handleCreateElevenLabsMessage(
       new Request(`${base}/api/tools/elevenlabs/create-message`, {
         method: "POST",
         body: JSON.stringify({}),
       }),
-      { marketingSecret: "" },
     );
     assert.equal(noSecretRes.status, 503);
     assert.deepEqual(await noSecretRes.json(), {
@@ -538,13 +628,13 @@ test("ElevenLabs server tool enforces agent-scoped credentials, blocks agent imp
   assert.equal(impersonateTenantBRes.status, 403);
   assert.equal((await impersonateTenantBRes.json()).recorded, false);
 
-  // Impersonation blocked (403): Tenant A token CANNOT pose as Orai marketing agent
-  const impersonateMarketingRes = await createMessageRoute(
+  // Impersonation blocked (403): Tenant A token CANNOT pose as Orai official first-party agent
+  const impersonateOraiRes = await createMessageRoute(
     new Request(`${base}/api/tools/elevenlabs/create-message`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${agentAToken}`,
-        "x-elevenlabs-agent-id": elMarketingAgent,
+        "x-elevenlabs-agent-id": elOraiOfficialAgent,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -554,15 +644,15 @@ test("ElevenLabs server tool enforces agent-scoped credentials, blocks agent imp
       }),
     }),
   );
-  assert.equal(impersonateMarketingRes.status, 403);
-  assert.equal((await impersonateMarketingRes.json()).recorded, false);
+  assert.equal(impersonateOraiRes.status, 403);
+  assert.equal((await impersonateOraiRes.json()).recorded, false);
 
-  // Impersonation blocked (403): Marketing secret CANNOT inject into a merchant agent
-  const marketingImpersonatesTenantRes = await createMessageRoute(
+  // Impersonation blocked (403): Orai official agent secret CANNOT inject into a merchant agent
+  const oraiImpersonatesTenantRes = await createMessageRoute(
     new Request(`${base}/api/tools/elevenlabs/create-message`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${marketingToolSecret}`,
+        "x-orai-tool-secret": oraiOfficialToken,
         "x-elevenlabs-agent-id": elAgentA,
         "Content-Type": "application/json",
       },
@@ -573,8 +663,8 @@ test("ElevenLabs server tool enforces agent-scoped credentials, blocks agent imp
       }),
     }),
   );
-  assert.equal(marketingImpersonatesTenantRes.status, 403);
-  assert.equal((await marketingImpersonatesTenantRes.json()).recorded, false);
+  assert.equal(oraiImpersonatesTenantRes.status, 403);
+  assert.equal((await oraiImpersonatesTenantRes.json()).recorded, false);
 
   const dbFailRes = await handleCreateElevenLabsMessage(
     new Request(`${base}/api/tools/elevenlabs/create-message`, {
@@ -603,7 +693,7 @@ test("ElevenLabs server tool enforces agent-scoped credentials, blocks agent imp
 });
 
 let merchantMsgId = "";
-let adminMsgId = "";
+let oraiFirstPartyMsgId = "";
 
 test("merchant routing ignores spoofed organizationId, allows missing contact details & multiple messages per conversation, and prevents duplicates", async () => {
   // 1) Pre-existing conversation in Org A so linking attaches immediately
@@ -767,14 +857,14 @@ test("merchant routing ignores spoofed organizationId, allows missing contact de
   assert.equal((await dupWithoutKeyRes.json()).replayed, true);
 });
 
-test("Orai marketing agent routes ONLY to admin inbox and notifies super_admin without leaking to merchants", async () => {
+test("Orai official agent routes as first-party tenant via x-orai-tool-secret and stays strictly isolated from other merchants", async () => {
   const res = await createMessageRoute(
     new Request(`${base}/api/tools/elevenlabs/create-message`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${marketingToolSecret}`,
-        "x-elevenlabs-agent-id": elMarketingAgent,
-        "x-elevenlabs-conversation-id": "conv_el_marketing_999",
+        "x-orai-tool-secret": oraiOfficialToken,
+        "x-elevenlabs-agent-id": elOraiOfficialAgent,
+        "x-elevenlabs-conversation-id": "conv_el_orai_999",
         "x-elevenlabs-channel": "web",
         "Content-Type": "application/json",
       },
@@ -792,20 +882,46 @@ test("Orai marketing agent routes ONLY to admin inbox and notifies super_admin w
   const body = await res.json();
   assert.equal(body.ok, true);
   assert.equal(body.recorded, true);
-  adminMsgId = body.messageId;
+  oraiFirstPartyMsgId = body.messageId;
 
   const row = (
     await db.query<{ inbox_scope: string; organization_id: string | null }>(
       "select inbox_scope, organization_id from public.messages where id = $1",
-      [adminMsgId],
+      [oraiFirstPartyMsgId],
     )
   ).rows[0];
-  assert.equal(row.inbox_scope, "admin");
-  assert.equal(row.organization_id, null);
+  assert.equal(row.inbox_scope, "merchant");
+  assert.equal(row.organization_id, orgOraiId);
 
-  // RLS verification: admin sees adminMsg, userA sees ONLY orgA merchant messages, userB sees 0 messages
+  // Sync Orai official post-call transcript into Orai organization & auto-link message
+  await db.exec("set role service_role");
+  try {
+    const oraiIngest = (
+      await db.query<{ ingest_elevenlabs_call: string }>(
+        "select public.ingest_elevenlabs_call($1::jsonb)",
+        [
+          JSON.stringify({
+            provider_agent_id: elOraiOfficialAgent,
+            provider_conversation_id: "conv_el_orai_999",
+            channel: "web",
+            duration_seconds: 68,
+            started_at: new Date().toISOString(),
+            ended_at: new Date().toISOString(),
+            summary: "12 間診所合作查詢與留言跟進",
+            transcript: [{ role: "user", message: "我們想了解企業方案" }],
+            analysis: { ok: true },
+          }),
+        ],
+      )
+    ).rows[0].ingest_elevenlabs_call;
+    assert.equal(oraiIngest, "synced");
+  } finally {
+    await db.exec("reset role");
+  }
+
+  // RLS verification: Salon A/B cannot see Orai messages; Orai customer_admin sees both migrated & new messages
   assert.equal(
-    (await asUser(userA, `select id from public.messages where id = '${adminMsgId}'`)).rows
+    (await asUser(userA, `select id from public.messages where organization_id = '${orgOraiId}'`)).rows
       .length,
     0,
   );
@@ -819,33 +935,35 @@ test("Orai marketing agent routes ONLY to admin inbox and notifies super_admin w
     2,
   );
   assert.equal(
-    (await asUser(adminUser, `select id from public.messages where id = '${adminMsgId}'`))
+    (await asUser(oraiOfficialUser, "select id from public.messages where inbox_scope = 'merchant'"))
       .rows.length,
-    1,
+    2,
   );
-
-  // Notifications: userA got 2 merchant notifications, userB got 0, admin got 1 marketing notification
-  const userANotifs = (
-    await asUser(userA, "select kind, message_id, title from public.notifications where read_at is null")
-  ).rows as { kind: string; message_id: string | null }[];
-  assert.equal(userANotifs.length, 2);
-  assert.ok(userANotifs.every((n) => n.kind === "message" && n.message_id));
-
+  // Super Admin has zero direct RLS read access to tenant messages or historical admin inbox rows
   assert.equal(
-    (await asUser(userB, "select id from public.notifications")).rows.length,
+    (await asUser(adminUser, "select id from public.messages")).rows.length,
     0,
   );
 
-  const adminNotifs = (
+  // Guardrail still prevents content mutation on migrated historical messages
+  await assert.rejects(
+    runServiceRpc("message_inbox_command", {
+      actor_id: adminUser,
+      tenant_id: orgOraiId,
+      operation: "add_note",
+      payload: { id: oraiFirstPartyMsgId, note: "super admin blocked from tenant inbox" },
+    }),
+    /Not authorized/,
+  );
+
+  const oraiNotifs = (
     await asUser(
-      adminUser,
+      oraiOfficialUser,
       "select kind, message_id, organization_id from public.notifications where read_at is null",
     )
   ).rows as { kind: string; message_id: string | null; organization_id: string | null }[];
-  assert.equal(adminNotifs.length, 1);
-  assert.equal(adminNotifs[0].kind, "message");
-  assert.equal(adminNotifs[0].message_id, adminMsgId);
-  assert.equal(adminNotifs[0].organization_id, null);
+  assert.equal(oraiNotifs.length, 2);
+  assert.ok(oraiNotifs.every((n) => n.kind === "message" && n.organization_id === orgOraiId));
 });
 
 test("mid-call message links automatically when post-call conversation arrives and rejects cross-tenant linking", async () => {
@@ -1123,41 +1241,60 @@ test("authenticated dashboard routes enforce RBAC, CSRF, status/note lifecycle, 
     /Not authorized/,
   );
 
-  // Admin inbox sees ONLY marketing message and can update it + mark admin notification read
+  // Retired admin message routes return 410 Gone for super_admin; Orai Service operates exclusively via /dashboard
+  const cookieOrai = await loginAs("orai-official@example.test", "customer");
   const adminListRes = await adminMessagesGet(
     new Request(`${base}/api/platform/admin/messages`, { headers: { cookie: cookieAdmin } }),
   );
-  assert.equal(adminListRes.status, 200);
-  const adminListBody = await adminListRes.json();
-  assert.equal(adminListBody.messages.length, 1);
-  assert.equal(adminListBody.messages[0].id, adminMsgId);
+  assert.equal(adminListRes.status, 410);
 
-  const adminProgress = await adminMessagesPatch(
+  const adminPatchRetired = await adminMessagesPatch(
     new Request(`${base}/api/platform/admin/messages`, {
       method: "PATCH",
       headers: { origin: base, cookie: cookieAdmin, "Content-Type": "application/json" },
       body: JSON.stringify({
-        id: adminMsgId,
+        id: oraiFirstPartyMsgId,
         action: "update_status",
         status: "in_progress",
         expected_version: 1,
       }),
     }),
   );
-  assert.equal(adminProgress.status, 200);
+  assert.equal(adminPatchRetired.status, 410);
+
+  // Orai first-party customer_admin sees both migrated historical message (with internal note) and new message via /dashboard API
+  const oraiListRes = await customerMessagesGet(
+    new Request(`${base}/api/platform/customer/messages`, { headers: { cookie: cookieOrai } }),
+  );
+  assert.equal(oraiListRes.status, 200);
+  const oraiListBody = await oraiListRes.json();
+  assert.equal(oraiListBody.messages.length, 2);
+
+  const oraiProgress = await customerMessagesPatch(
+    new Request(`${base}/api/platform/customer/messages`, {
+      method: "PATCH",
+      headers: { origin: base, cookie: cookieOrai, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: oraiFirstPartyMsgId,
+        action: "update_status",
+        status: "in_progress",
+        expected_version: 1,
+      }),
+    }),
+  );
+  assert.equal(oraiProgress.status, 200);
 
   const notifListRes = await notificationsGet(
-    new Request(`${base}/api/platform/notifications`, { headers: { cookie: cookieAdmin } }),
+    new Request(`${base}/api/platform/notifications`, { headers: { cookie: cookieOrai } }),
   );
   assert.equal(notifListRes.status, 200);
   const notifListBody = await notifListRes.json();
-  assert.equal(notifListBody.unread, 1);
-  assert.equal(notifListBody.notifications[0].message_id, adminMsgId);
+  assert.equal(notifListBody.unread, 2);
 
   const markReadRes = await notificationsPatch(
     new Request(`${base}/api/platform/notifications`, {
       method: "PATCH",
-      headers: { origin: base, cookie: cookieAdmin, "Content-Type": "application/json" },
+      headers: { origin: base, cookie: cookieOrai, "Content-Type": "application/json" },
       body: JSON.stringify({ id: notifListBody.notifications[0].id }),
     }),
   );

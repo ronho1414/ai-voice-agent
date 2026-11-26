@@ -156,6 +156,7 @@ before(async () => {
     "20261126023000_message_inbox.sql",
     "20261126140000_whatsapp_cloud_api.sql",
     "20261126160000_stabilization_audit_fixes.sql",
+    "20261127020000_orai_first_party_tenant.sql",
   ]) {
     const sql = await readFile(
       new URL(`../supabase/migrations/${file}`, import.meta.url),

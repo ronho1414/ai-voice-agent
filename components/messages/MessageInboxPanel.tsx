@@ -33,7 +33,7 @@ type MessageDetailResponse = {
 };
 
 type MessageInboxPanelProps = {
-  apiPath: "/api/platform/customer/messages" | "/api/platform/admin/messages";
+  apiPath: "/api/platform/customer/messages";
   title?: string;
   subtitle?: string;
   initialMessageId?: string | null;

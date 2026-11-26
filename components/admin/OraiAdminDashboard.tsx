@@ -2,8 +2,6 @@
 
 import { useEffect, useState, useCallback, type FormEvent } from "react";
 import type { Organization, SuperAdminOverview } from "@/lib/platform/types";
-import type { MessageCounts } from "@/lib/platform/messages";
-import { MessageInboxPanel } from "@/components/messages/MessageInboxPanel";
 import {
   AdminChangeRequestsPanel,
   NotificationBell,
@@ -46,7 +44,7 @@ export function OraiAdminDashboard() {
   const [authenticated, setAuthenticated] = useState(false);
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
-  const [tab, setTab] = useState<"overview" | "customers" | "agents" | "usage" | "system" | "requests" | "messages">("overview");
+  const [tab, setTab] = useState<"overview" | "customers" | "agents" | "usage" | "system" | "requests">("overview");
   const [overview, setOverview] = useState<SuperAdminOverview | null>(null);
   const [organizations, setOrganizations] = useState<OrgWithAgent[]>([]);
   const [usageList, setUsageList] = useState<UsageSummaryRow[]>([]);
@@ -56,8 +54,6 @@ export function OraiAdminDashboard() {
   const [successMsg, setSuccessMsg] = useState("");
   const [pendingRequestCount, setPendingRequestCount] = useState<number | null>(null);
   const [focusRequestId, setFocusRequestId] = useState<string | null>(null);
-  const [pendingMessageCount, setPendingMessageCount] = useState<number | null>(null);
-  const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
 
   const openManagedRequest = useCallback((requestId: string) => {
     setFocusRequestId(requestId);
@@ -70,19 +66,6 @@ export function OraiAdminDashboard() {
 
   const clearFocusRequest = useCallback(() => {
     setFocusRequestId(null);
-  }, []);
-
-  const openInboxMessage = useCallback((messageId: string) => {
-    setFocusMessageId(messageId);
-    setTab("messages");
-  }, []);
-
-  const handleMessageCounts = useCallback((counts: MessageCounts) => {
-    setPendingMessageCount(typeof counts.pending === "number" ? counts.pending : 0);
-  }, []);
-
-  const clearFocusMessage = useCallback(() => {
-    setFocusMessageId(null);
   }, []);
 
   // Create Business Form State
@@ -155,22 +138,12 @@ export function OraiAdminDashboard() {
 
     async function loadPendingCount() {
       try {
-        const [reqRes, msgRes] = await Promise.all([
-          fetch("/api/platform/admin/change-requests?page=1", { cache: "no-store" }),
-          fetch("/api/platform/admin/messages?page=1", { cache: "no-store" }),
-        ]);
+        const reqRes = await fetch("/api/platform/admin/change-requests?page=1", { cache: "no-store" });
         if (reqRes.ok) {
           const body = await reqRes.json();
           const pending = body?.counts?.pending;
           if (!cancelled && typeof pending === "number") {
             setPendingRequestCount(pending);
-          }
-        }
-        if (msgRes.ok) {
-          const msgBody = await msgRes.json();
-          const pendingMessages = msgBody?.counts?.pending;
-          if (!cancelled && typeof pendingMessages === "number") {
-            setPendingMessageCount(pendingMessages);
           }
         }
       } catch {
@@ -440,26 +413,6 @@ export function OraiAdminDashboard() {
 
           <button
             type="button"
-            onClick={() => setTab("messages")}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
-              tab === "messages" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
-            }`}
-          >
-            <span className="flex-1">留言及跟進</span>
-            {pendingMessageCount !== null && pendingMessageCount > 0 && (
-              <span
-                aria-label={`待處理留言 ${pendingMessageCount} 項`}
-                className={`min-w-[1.25rem] rounded-full px-1.5 py-0.5 text-center text-[10px] font-extrabold ${
-                  tab === "messages" ? "bg-white text-[#09090B]" : "bg-[#09090B] text-white"
-                }`}
-              >
-                {pendingMessageCount > 99 ? "99+" : pendingMessageCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            type="button"
             onClick={() => setTab("usage")}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
               tab === "usage" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
@@ -502,7 +455,7 @@ export function OraiAdminDashboard() {
       <main className="flex-1 p-6 sm:p-10 max-w-6xl">
         <div className="mb-7 flex items-center justify-between gap-4">
           <div className="font-bold text-base">Orai 總管理員後台</div>
-          <NotificationBell onOpenRequest={openManagedRequest} onOpenMessage={openInboxMessage} />
+          <NotificationBell onOpenRequest={openManagedRequest} />
         </div>
         {error && (
           <div className="mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
@@ -520,17 +473,6 @@ export function OraiAdminDashboard() {
             initialRequestId={focusRequestId}
             onRequestHandled={clearFocusRequest}
             onCountsChange={handleRequestCounts}
-          />
-        )}
-
-        {tab === "messages" && (
-          <MessageInboxPanel
-            apiPath="/api/platform/admin/messages"
-            title="Orai 官網留言及跟進"
-            subtitle="集中處理來自 Orai 官方示範 AI 接待員嘅留言、回電要求同合作查詢（不會混入商戶租戶留言）"
-            initialMessageId={focusMessageId}
-            onMessageHandled={clearFocusMessage}
-            onCountsChange={handleMessageCounts}
           />
         )}
 

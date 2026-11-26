@@ -83,26 +83,16 @@ async function defaultPersistMessage(payload: Record<string, unknown>) {
 export async function handleCreateElevenLabsMessage(
   request: Request,
   options: {
-    marketingSecret?: string | undefined;
-    secret?: string | undefined;
-    marketingAgentId?: string | undefined;
     persist?: PersistMessageRpc;
   } = {},
 ): Promise<Response> {
-  const marketingSecret = (
-    options.marketingSecret ??
-    options.secret ??
-    process.env.ELEVENLABS_MARKETING_TOOL_SECRET ??
-    process.env.ELEVENLABS_SERVER_TOOL_SECRET
-  )?.trim() ?? "";
-
   const dbConfigured = Boolean(
     options.persist ||
       (process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() &&
         process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()),
   );
 
-  if (!marketingSecret && !dbConfigured) {
+  if (!dbConfigured) {
     return Response.json(
       { ok: false, recorded: false, error: "Server tool authentication is not configured" },
       { status: 503, headers: NO_STORE },
@@ -111,16 +101,6 @@ export async function handleCreateElevenLabsMessage(
 
   const providedSecret = extractBearerOrSecret(request);
   if (!providedSecret) {
-    return Response.json(
-      { ok: false, recorded: false, error: "Unauthorized" },
-      { status: 401, headers: NO_STORE },
-    );
-  }
-
-  const isMarketingToken = Boolean(
-    marketingSecret && isValidToolSecret(providedSecret, marketingSecret),
-  );
-  if (!isMarketingToken && !dbConfigured) {
     return Response.json(
       { ok: false, recorded: false, error: "Unauthorized" },
       { status: 401, headers: NO_STORE },
@@ -176,22 +156,6 @@ export async function handleCreateElevenLabsMessage(
       false,
     );
 
-    const marketingAgentId = (options.marketingAgentId ?? configuredMarketingAgentId()).trim();
-    if (isMarketingToken) {
-      if (!marketingAgentId) {
-        return Response.json(
-          { ok: false, recorded: false, error: "Marketing agent identity is not configured" },
-          { status: 503, headers: NO_STORE },
-        );
-      }
-      if (claimedAgentId && claimedAgentId !== marketingAgentId) {
-        return Response.json(
-          { ok: false, recorded: false, error: "Agent credential does not match agent identity" },
-          { status: 403, headers: NO_STORE },
-        );
-      }
-    }
-
     const knownWaIds = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim()
       ? [process.env.WHATSAPP_PHONE_NUMBER_ID.trim()]
       : [];
@@ -215,16 +179,13 @@ export async function handleCreateElevenLabsMessage(
       payloadHash,
     });
 
-    const credentialTokenHash = isMarketingToken
-      ? ""
-      : createHash("sha256").update(providedSecret, "utf8").digest("hex");
+    const credentialTokenHash = createHash("sha256").update(providedSecret, "utf8").digest("hex");
 
     const persist = options.persist ?? defaultPersistMessage;
     const rpcResult = await persist({
-      auth_mode: isMarketingToken ? "marketing" : "agent_token",
+      auth_mode: "agent_token",
       credential_token_hash: credentialTokenHash,
       claimed_provider_agent_id: claimedAgentId,
-      marketing_agent_id: marketingAgentId,
       provider_conversation_id: providerConversationId,
       called_number: calledNumber,
       channel,
