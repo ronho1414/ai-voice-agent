@@ -35,9 +35,10 @@ export type ChangeRequest = { id: string; reference: string; organization_id: st
 export type RequestEvent = { id: string; kind: string; message: string; created_at: string; actor_id: string };
 export type Notification = {
   id: string;
-  kind?: "agent_request" | "message";
+  kind?: "agent_request" | "message" | "whatsapp_handoff";
   request_id: string | null;
   message_id?: string | null;
+  whatsapp_conversation_id?: string | null;
   organization_id?: string | null;
   title: string;
   created_at: string;

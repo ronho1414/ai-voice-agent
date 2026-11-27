@@ -315,12 +315,18 @@ let legacyAdminMsgId = "";
     await db.exec("reset role");
   }
 
-  // Apply First-party Tenant migration and run idempotent provisioning + historical backfill RPC
-  const firstPartySql = await readFile(
-    new URL("../supabase/migrations/20261127020000_orai_first_party_tenant.sql", import.meta.url),
-    "utf8",
-  );
-  await db.exec(firstPartySql);
+  // Apply First-party Tenant & Staged Credential Rotation migrations and run idempotent provisioning + historical backfill RPC
+  for (const migFile of [
+    "20261127020000_orai_first_party_tenant.sql",
+    "20261127060000_staged_credential_rotation.sql",
+    "20261127080000_whatsapp_live_inbox.sql",
+  ]) {
+    const migSql = await readFile(
+      new URL(`../supabase/migrations/${migFile}`, import.meta.url),
+      "utf8",
+    );
+    await db.exec(migSql);
+  }
 
   await db.exec("set role service_role");
   try {
@@ -1339,4 +1345,131 @@ test("multi-channel detection distinguishes web placeholders, WhatsApp IDs, and 
     }).channel,
     "phone",
   );
+});
+
+test("staged credential rotation keeps old token active until verified, then cleanly revokes old token", async () => {
+  const rotatedToken = "orai_mkt_rot_fictional_rotation_999999";
+  const thirdToken = "orai_mkt_rot_fictional_third_888888";
+
+  const agentRows = (
+    await db.query<{ id: string }>(
+      "select id from public.agents where elevenlabs_agent_id = $1",
+      [elOraiOfficialAgent],
+    )
+  ).rows;
+  const oraiAgentUuid = agentRows[0].id;
+
+  await db.exec("set role service_role");
+  let stagedCredId = "";
+  try {
+    const stageRes = (
+      await db.query<{ res: { id: string; secret_prefix: string } }>(
+        "select public.stage_agent_tool_credential($1::uuid, $2::text, $3::text) as res",
+        [oraiAgentUuid, sha256Hex(rotatedToken), "orai_mkt_rot"],
+      )
+    ).rows[0].res;
+    stagedCredId = stageRes.id;
+    assert.equal(stageRes.secret_prefix, "orai_mkt_rot");
+
+    // Cap overlapping active keys strictly at 2
+    await assert.rejects(
+      db.query(
+        "select public.stage_agent_tool_credential($1::uuid, $2::text, $3::text)",
+        [oraiAgentUuid, sha256Hex(thirdToken), "orai_mkt_3rd"],
+      ),
+      /Maximum overlapping active credentials/,
+    );
+  } finally {
+    await db.exec("reset role");
+  }
+
+  // Both old and newly staged tokens succeed cleanly during transition
+  const oldStillWorks = await createMessageRoute(
+    new Request(`${base}/api/tools/elevenlabs/create-message`, {
+      method: "POST",
+      headers: {
+        "x-orai-tool-secret": oraiOfficialToken,
+        "x-elevenlabs-agent-id": elOraiOfficialAgent,
+        "x-idempotency-key": "rot-overlap-old-001",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        senderName: "輪換過渡測試（舊）",
+        messageContent: "過渡期舊金鑰仍可接收。",
+        category: "general_message",
+      }),
+    }),
+  );
+  assert.equal(oldStillWorks.status, 200);
+
+  const newWorksNow = await createMessageRoute(
+    new Request(`${base}/api/tools/elevenlabs/create-message`, {
+      method: "POST",
+      headers: {
+        "x-orai-tool-secret": rotatedToken,
+        "x-elevenlabs-agent-id": elOraiOfficialAgent,
+        "x-idempotency-key": "rot-overlap-new-001",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        senderName: "輪換過渡測試（新）",
+        messageContent: "新金鑰驗證成功。",
+        category: "general_message",
+      }),
+    }),
+  );
+  assert.equal(newWorksNow.status, 200);
+
+  // Revoke old credential only AFTER verifying the replacement succeeds
+  await db.exec("set role service_role");
+  try {
+    const revokeRes = (
+      await db.query<{ res: { ok: boolean; revoked_count: number; kept_credential_id: string } }>(
+        "select public.revoke_agent_tool_credential($1::uuid, $2::uuid) as res",
+        [oraiAgentUuid, stagedCredId],
+      )
+    ).rows[0].res;
+    assert.equal(revokeRes.ok, true);
+    assert.equal(revokeRes.revoked_count, 1);
+    assert.equal(revokeRes.kept_credential_id, stagedCredId);
+  } finally {
+    await db.exec("reset role");
+  }
+
+  // Old token is now rejected 401 while rotated token keeps working 200
+  const oldRejected = await createMessageRoute(
+    new Request(`${base}/api/tools/elevenlabs/create-message`, {
+      method: "POST",
+      headers: {
+        "x-orai-tool-secret": oraiOfficialToken,
+        "x-elevenlabs-agent-id": elOraiOfficialAgent,
+        "x-idempotency-key": "rot-after-old-001",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        senderName: "舊金鑰應失敗",
+        messageContent: "不應寫入。",
+        category: "general_message",
+      }),
+    }),
+  );
+  assert.equal(oldRejected.status, 401);
+
+  const newStillWorks = await createMessageRoute(
+    new Request(`${base}/api/tools/elevenlabs/create-message`, {
+      method: "POST",
+      headers: {
+        "x-orai-tool-secret": rotatedToken,
+        "x-elevenlabs-agent-id": elOraiOfficialAgent,
+        "x-idempotency-key": "rot-after-new-001",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        senderName: "新金鑰持續正常",
+        messageContent: "撤銷舊金鑰後仍成功。",
+        category: "general_message",
+      }),
+    }),
+  );
+  assert.equal(newStillWorks.status, 200);
 });

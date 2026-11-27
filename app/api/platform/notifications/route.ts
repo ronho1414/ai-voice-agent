@@ -6,7 +6,7 @@ export const GET = withPlatformRequest(async request => {
   try {
     const db = requestSupabase(request);
     const [{ data, error }, { count, error: countError }] = await Promise.all([
-      db.from("notifications").select("id,kind,request_id,message_id,organization_id,title,read_at,created_at").eq("recipient_id", session.userId).order("created_at", { ascending: false }).limit(50),
+      db.from("notifications").select("id,kind,request_id,message_id,whatsapp_conversation_id,organization_id,title,read_at,created_at").eq("recipient_id", session.userId).order("created_at", { ascending: false }).limit(50),
       db.from("notifications").select("id", { count: "exact", head: true }).eq("recipient_id", session.userId).is("read_at", null),
     ]);
     if (error || countError) throw new ManagedError("未能載入通知。", 503);

@@ -38,6 +38,7 @@ export type WhatsAppWebhookMessageItem = {
   timestamp_sec: string;
   message_type: "template" | "text" | "interactive" | "image" | "audio" | "document" | "other";
   body_text: string;
+  media_metadata?: Record<string, unknown>;
 };
 
 export type SendWhatsAppInput =
@@ -209,11 +210,54 @@ export function parseWhatsAppWebhookPayload(raw: unknown): {
           ) as WhatsAppWebhookMessageItem["message_type"];
 
           let bodyText = "";
+          const mediaMetadata: Record<string, unknown> = { raw_type: rawType };
+
           if (msgType === "text" && msg.text && typeof msg.text === "object") {
             const textObj = msg.text as Record<string, unknown>;
             if (typeof textObj.body === "string") bodyText = textObj.body.trim().slice(0, 4096);
           } else if (msgType === "interactive" && msg.interactive && typeof msg.interactive === "object") {
-            bodyText = JSON.stringify(msg.interactive).slice(0, 1000);
+            const inter = msg.interactive as Record<string, unknown>;
+            const replyTitle =
+              (inter.button_reply && typeof inter.button_reply === "object"
+                ? (inter.button_reply as Record<string, unknown>).title
+                : undefined) ??
+              (inter.list_reply && typeof inter.list_reply === "object"
+                ? (inter.list_reply as Record<string, unknown>).title
+                : undefined);
+            bodyText =
+              typeof replyTitle === "string" && replyTitle.trim()
+                ? replyTitle.trim().slice(0, 1000)
+                : JSON.stringify(msg.interactive).slice(0, 1000);
+            mediaMetadata.interactive = inter;
+          } else if (
+            (rawType === "image" || rawType === "audio" || rawType === "document" || rawType === "video" || rawType === "sticker") &&
+            msg[rawType] &&
+            typeof msg[rawType] === "object"
+          ) {
+            const mediaObj = msg[rawType] as Record<string, unknown>;
+            if (typeof mediaObj.id === "string") mediaMetadata.media_id = mediaObj.id.slice(0, 128);
+            if (typeof mediaObj.mime_type === "string") mediaMetadata.mime_type = mediaObj.mime_type.slice(0, 128);
+            if (typeof mediaObj.sha256 === "string") mediaMetadata.sha256 = mediaObj.sha256.slice(0, 128);
+            if (typeof mediaObj.filename === "string") mediaMetadata.filename = mediaObj.filename.slice(0, 255);
+            if (typeof mediaObj.caption === "string") {
+              mediaMetadata.caption = mediaObj.caption.trim().slice(0, 1024);
+              bodyText = mediaObj.caption.trim().slice(0, 4096);
+            } else if (typeof mediaObj.filename === "string" && mediaObj.filename.trim()) {
+              bodyText = mediaObj.filename.trim().slice(0, 255);
+            }
+            if (mediaObj.voice === true) mediaMetadata.voice = true;
+          } else if (rawType === "location" && msg.location && typeof msg.location === "object") {
+            const loc = msg.location as Record<string, unknown>;
+            mediaMetadata.location = loc;
+            const label = [loc.name, loc.address].filter((v) => typeof v === "string" && v.trim()).join(" - ");
+            bodyText = label ? `[位置] ${label}`.slice(0, 500) : "[位置訊息]";
+          } else if (rawType === "button" && msg.button && typeof msg.button === "object") {
+            const btn = msg.button as Record<string, unknown>;
+            if (typeof btn.text === "string") bodyText = btn.text.trim().slice(0, 1000);
+            mediaMetadata.button = btn;
+          } else if (rawType === "contacts" && Array.isArray(msg.contacts)) {
+            mediaMetadata.contacts_count = msg.contacts.length;
+            bodyText = `[聯絡人卡片 x${msg.contacts.length}]`;
           }
 
           messages.push({
@@ -225,6 +269,7 @@ export function parseWhatsAppWebhookPayload(raw: unknown): {
             timestamp_sec: typeof msg.timestamp === "string" || typeof msg.timestamp === "number" ? String(msg.timestamp) : "",
             message_type: msgType,
             body_text: bodyText,
+            media_metadata: mediaMetadata,
           });
         }
       }
@@ -287,15 +332,50 @@ async function defaultPersistWebhook(parsed: {
   return data as Record<string, unknown>;
 }
 
+async function verifyChannelSpecificSignature(
+  rawBytes: Uint8Array,
+  signature: string | null,
+  parsedJson: unknown,
+): Promise<boolean> {
+  if (!signature) return false;
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || !process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()) {
+    return false;
+  }
+  try {
+    const parsed = parseWhatsAppWebhookPayload(parsedJson);
+    const phoneIds = Array.from(
+      new Set([
+        ...parsed.messages.map((m) => m.phone_number_id),
+        ...parsed.statuses.map((s) => s.phone_number_id),
+      ]),
+    );
+    if (phoneIds.length === 0) return false;
+    const { data, error } = await serviceDatabase().rpc("list_whatsapp_channel_app_secrets", {
+      p_phone_number_ids: phoneIds,
+    });
+    if (error || !Array.isArray(data) || data.length === 0) return false;
+    return data.every((row: { app_secret?: string }) =>
+      verifyWhatsAppSignature(rawBytes, signature, typeof row.app_secret === "string" ? row.app_secret : ""),
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function handleWhatsAppWebhookPost(
   request: Request,
   options: {
     config?: WhatsAppRuntimeConfig;
     persist?: PersistWhatsAppWebhook;
+    onJobsEnqueued?: (count: number) => void;
+    verifyChannelSignature?: (rawBytes: Uint8Array, signature: string | null, jsonBody: unknown) => Promise<boolean>;
   } = {},
 ): Promise<Response> {
   const config = options.config ?? readWhatsAppConfig();
-  if (!config.appSecret) {
+  const hasDb = Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() && process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
+  );
+  if (!config.appSecret && !hasDb && !options.verifyChannelSignature) {
     return Response.json(
       { ok: false, error: "WhatsApp webhook secret is not configured" },
       { status: 503, headers: NO_STORE },
@@ -334,21 +414,35 @@ export async function handleWhatsAppWebhookPost(
   }
   const rawBytes = Buffer.concat(chunks);
 
-  const signature = request.headers.get("x-hub-signature-256");
-  if (!verifyWhatsAppSignature(rawBytes, signature, config.appSecret)) {
-    return Response.json(
-      { ok: false, error: "Invalid signature" },
-      { status: 401, headers: NO_STORE },
-    );
-  }
-
   let jsonBody: unknown;
   try {
     jsonBody = JSON.parse(rawBytes.toString("utf8"));
   } catch {
+    const signaturePrecheck = request.headers.get("x-hub-signature-256");
+    if (!config.appSecret || !verifyWhatsAppSignature(rawBytes, signaturePrecheck, config.appSecret)) {
+      return Response.json(
+        { ok: false, error: "Invalid signature" },
+        { status: 401, headers: NO_STORE },
+      );
+    }
     return Response.json(
       { ok: false, error: "Malformed JSON payload" },
       { status: 400, headers: NO_STORE },
+    );
+  }
+
+  const signature = request.headers.get("x-hub-signature-256");
+  const platformVerified = config.appSecret ? verifyWhatsAppSignature(rawBytes, signature, config.appSecret) : false;
+  const channelVerified = platformVerified
+    ? true
+    : options.verifyChannelSignature
+      ? await options.verifyChannelSignature(rawBytes, signature, jsonBody)
+      : await verifyChannelSpecificSignature(rawBytes, signature, jsonBody);
+
+  if (!channelVerified) {
+    return Response.json(
+      { ok: false, error: "Invalid signature" },
+      { status: 401, headers: NO_STORE },
     );
   }
 
@@ -356,6 +450,11 @@ export async function handleWhatsAppWebhookPost(
     const parsed = parseWhatsAppWebhookPayload(jsonBody);
     const persist = options.persist ?? defaultPersistWebhook;
     const summary = await persist(parsed);
+    const aiJobsEnqueued =
+      typeof summary.ai_jobs_enqueued === "number" ? summary.ai_jobs_enqueued : 0;
+    if (aiJobsEnqueued > 0 && options.onJobsEnqueued) {
+      options.onJobsEnqueued(aiJobsEnqueued);
+    }
     return Response.json({ ok: true, ...summary }, { status: 200, headers: NO_STORE });
   } catch (err) {
     return managedFailure(err);

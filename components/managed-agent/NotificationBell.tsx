@@ -12,9 +12,10 @@ type NotificationsResponse = {
 type NotificationBellProps = {
   onOpenRequest: (requestId: string) => void;
   onOpenMessage?: (messageId: string) => void;
+  onOpenWhatsApp?: (conversationId: string) => void;
 };
 
-export function NotificationBell({ onOpenRequest, onOpenMessage }: NotificationBellProps) {
+export function NotificationBell({ onOpenRequest, onOpenMessage, onOpenWhatsApp }: NotificationBellProps) {
   const panelId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -117,6 +118,10 @@ export function NotificationBell({ onOpenRequest, onOpenMessage }: NotificationB
       }
     }
     setOpen(false);
+    if (item.kind === "whatsapp_handoff" && item.whatsapp_conversation_id && onOpenWhatsApp) {
+      onOpenWhatsApp(item.whatsapp_conversation_id);
+      return;
+    }
     if (item.kind === "message" && item.message_id && onOpenMessage) {
       onOpenMessage(item.message_id);
       return;

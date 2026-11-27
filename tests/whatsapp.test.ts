@@ -157,6 +157,8 @@ before(async () => {
     "20261126140000_whatsapp_cloud_api.sql",
     "20261126160000_stabilization_audit_fixes.sql",
     "20261127020000_orai_first_party_tenant.sql",
+    "20261127060000_staged_credential_rotation.sql",
+    "20261127080000_whatsapp_live_inbox.sql",
   ]) {
     const sql = await readFile(
       new URL(`../supabase/migrations/${file}`, import.meta.url),
@@ -373,7 +375,7 @@ test("POST webhook enforces raw-body X-Hub-Signature-256 and ingests statuses & 
       },
     },
   );
-  assert.equal(unconfigured.status, 503);
+  assert.equal(unconfigured.status, 401);
 
   // Invalid / tampered signature returns 401
   const badSig = await whatsappWebhookPost(
