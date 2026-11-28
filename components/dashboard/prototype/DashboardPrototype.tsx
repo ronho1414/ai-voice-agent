@@ -514,24 +514,20 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
       <style>{`
         nextjs-portal{display:none !important}
         .prototype-shell{--rail:88px;--mark-h:40px;--mark-w:calc(var(--mark-h) * 2400 / 1130);--mark-o:calc(var(--mark-h) * 868 / 1130);--mark-cx:calc(var(--mark-h) * 434 / 1130);--logo-clear:calc((var(--rail) / 2) - var(--mark-cx) + var(--mark-w) - var(--rail) + 16px)}
-        .orai-logo-reveal{position:absolute;top:0;left:calc(50% - var(--mark-cx));height:var(--mark-h);width:var(--mark-o);overflow:hidden;transition:width 350ms cubic-bezier(0.4, 0, 0.2, 1)}
-        .orai-logo-slot:hover .orai-logo-reveal,.orai-logo-slot:focus-within .orai-logo-reveal{width:var(--mark-w)}
-        .orai-logo-img{display:block;height:var(--mark-h) !important;width:var(--mark-w) !important;max-width:none !important;max-height:none !important}
+        .orai-logo-frame{position:relative;width:85%;aspect-ratio:2400 / 1130}
+        .orai-logo-mark{object-fit:contain;object-position:center;transition:opacity 300ms ease}
+        .orai-logo-o{opacity:1}
+        .orai-logo-full{opacity:0}
+        .orai-logo-slot:hover .orai-logo-o,.orai-logo-slot:focus-within .orai-logo-o{opacity:0}
+        .orai-logo-slot:hover .orai-logo-full,.orai-logo-slot:focus-within .orai-logo-full{opacity:1}
         .prototype-header{padding-left:var(--logo-clear)}
-        @media (prefers-reduced-motion: reduce){.orai-logo-reveal{transition:none}}
+        @media (prefers-reduced-motion: reduce){.orai-logo-mark{transition:none}}
       `}</style>
       <nav aria-label="功能導航" className="relative z-30 flex h-full w-[88px] shrink-0 flex-col overflow-visible bg-[#F0F3F8] px-1.5 py-2.5">
-        <div className="orai-logo-slot relative mb-7 h-10 w-full shrink-0">
-          <div className="orai-logo-reveal">
-            <Image
-              src={WORDMARK_ON_LIGHT}
-              alt="orai"
-              width={2400}
-              height={1130}
-              priority
-              unoptimized
-              className="orai-logo-img"
-            />
+        <div className="orai-logo-slot relative mb-7 flex h-10 w-full shrink-0 items-end justify-center">
+          <div className="orai-logo-frame">
+            <Image src="/prototype/logo-o.png" alt="" fill priority unoptimized className="orai-logo-mark orai-logo-o" />
+            <Image src={WORDMARK_ON_LIGHT} alt="orai" fill priority unoptimized className="orai-logo-mark orai-logo-full" />
           </div>
         </div>
         <div className="flex flex-col gap-0.5">
