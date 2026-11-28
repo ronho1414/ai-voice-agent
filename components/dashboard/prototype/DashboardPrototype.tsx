@@ -513,21 +513,24 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
     <div data-prototype="dashboard" className="prototype-shell fixed inset-0 flex overflow-hidden bg-white text-[13px] text-[#20293B]">
       <style>{`
         nextjs-portal{display:none !important}
-        .prototype-shell{--rail:88px;--mark-h:40px;--mark-w:calc(var(--mark-h) * 2400 / 1130);--mark-o:calc(var(--mark-h) * 868 / 1130);--mark-cx:calc(var(--mark-h) * 434 / 1130);--logo-clear:calc((var(--rail) / 2) - var(--mark-cx) + var(--mark-w) - var(--rail) + 16px)}
-        .orai-logo-frame{position:relative;width:85%;aspect-ratio:2400 / 1130}
-        .orai-logo-mark{object-fit:contain;object-position:center;transition:opacity 300ms ease}
-        .orai-logo-o{opacity:1}
-        .orai-logo-full{opacity:0}
-        .orai-logo-slot:hover .orai-logo-o,.orai-logo-slot:focus-within .orai-logo-o{opacity:0}
-        .orai-logo-slot:hover .orai-logo-full,.orai-logo-slot:focus-within .orai-logo-full{opacity:1}
-        .prototype-header{padding-left:var(--logo-clear)}
-        @media (prefers-reduced-motion: reduce){.orai-logo-mark{transition:none}}
+        .prototype-shell{--mark-h:36px;--mark-w:calc(var(--mark-h) * 2400 / 1130);--mark-o:calc(var(--mark-h) * 868 / 1130);--mark-cx:calc(var(--mark-h) * 434 / 1130)}
+        .orai-logo-reveal{position:absolute;top:0;left:calc(50% - var(--mark-cx));height:var(--mark-h);width:var(--mark-o);overflow:hidden;transition:width 350ms cubic-bezier(0.4, 0, 0.2, 1)}
+        .orai-logo-slot:hover .orai-logo-reveal,.orai-logo-slot:focus-within .orai-logo-reveal{width:var(--mark-w)}
+        .orai-logo-img{display:block;height:var(--mark-h) !important;width:var(--mark-w) !important;max-width:none !important}
+        @media (prefers-reduced-motion: reduce){.orai-logo-reveal{transition:none}}
       `}</style>
-      <nav aria-label="功能導航" className="relative z-30 flex h-full w-[88px] shrink-0 flex-col overflow-visible bg-[#F0F3F8] px-1.5 py-2.5">
-        <div className="orai-logo-slot relative mb-7 flex h-10 w-full shrink-0 items-end justify-center">
-          <div className="orai-logo-frame">
-            <Image src="/prototype/logo-o.png" alt="" fill priority unoptimized className="orai-logo-mark orai-logo-o" />
-            <Image src={WORDMARK_ON_LIGHT} alt="orai" fill priority unoptimized className="orai-logo-mark orai-logo-full" />
+      <nav aria-label="功能導航" className="relative z-30 flex h-full w-[144px] shrink-0 flex-col bg-[#F0F3F8] px-2 py-2.5">
+        <div className="orai-logo-slot relative mb-7 h-9 w-full shrink-0">
+          <div className="orai-logo-reveal">
+            <Image
+              src={WORDMARK_ON_LIGHT}
+              alt="orai"
+              width={2400}
+              height={1130}
+              priority
+              unoptimized
+              className="orai-logo-img"
+            />
           </div>
         </div>
         <div className="flex flex-col gap-0.5">
@@ -548,8 +551,8 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
                   active ? "bg-[#E3EDFC] text-[#2563EB]" : "text-[#7C8798] hover:bg-white/80 hover:text-[#20293B]"
                 }`}
               >
-                <Icon name={item.icon} />
-                <span className="flex max-w-full items-center gap-0.5 text-[10px] leading-none">
+                <Icon name={item.icon} className="h-[22px] w-[22px]" />
+                <span className="flex max-w-full items-center gap-0.5 text-[11px] leading-none">
                   <span className="truncate">{item.label}</span>
                   {badge > 0 && (
                     <span className="min-w-[14px] rounded-full bg-[#2563EB] px-1 text-center text-[9px] font-semibold leading-[14px] text-white">
@@ -571,7 +574,7 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
       </nav>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="prototype-header flex h-12 shrink-0 items-center justify-between border-b border-[#E0E4EB] bg-white pr-4">
+        <header className="flex h-12 shrink-0 items-center justify-between border-b border-[#E0E4EB] bg-white px-4">
           <div className="flex items-center gap-2">
             <h1 className="text-[13px] font-semibold">{current.label}</h1>
             <span className="rounded border border-[#E0E4EB] px-1.5 py-0.5 text-[10px] leading-4 text-[#657084]">視覺原型</span>
