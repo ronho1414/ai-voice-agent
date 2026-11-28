@@ -448,6 +448,7 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
   }, [inChannel, query, statusFilter, stickyId]);
 
   const selected = threads.find((thread) => thread.id === selectedId) ?? null;
+  const selectedInView = visible.some((thread) => thread.id === selectedId) ? selected : null;
 
   useEffect(() => {
     const node = threadRef.current;
@@ -634,7 +635,7 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
           <Inbox
             counts={counts}
             visible={visible}
-            selected={selected}
+            selected={selectedInView}
             selectedId={selectedId}
             query={query}
             statusFilter={statusFilter}
