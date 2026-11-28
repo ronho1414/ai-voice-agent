@@ -509,7 +509,7 @@ export function WhatsAppInboxPanel({
       )}
 
       <div className="flex min-h-0 flex-1">
-        <aside className={`w-[180px] shrink-0 flex-col overflow-y-auto border-r border-[#E0E4EB] bg-white px-2 py-3 ${mobileShowChat ? "hidden lg:flex" : "flex"}`}>
+        <aside className="hidden w-[180px] shrink-0 flex-col overflow-y-auto border-r border-[#E0E4EB] bg-white px-2 py-3 lg:flex">
           {FILTER_OPTIONS.map((opt) => (
             <button
               key={opt.key}
@@ -526,10 +526,24 @@ export function WhatsAppInboxPanel({
         </aside>
         <section
           aria-label="WhatsApp 對話列表"
-          className={`flex w-full flex-col border-r border-[#E0E4EB] md:w-[300px] ${
+          className={`min-w-0 flex-1 flex-col border-r border-[#E0E4EB] lg:w-[300px] lg:flex-none ${
             mobileShowChat ? "hidden lg:flex" : "flex"
           }`}
         >
+          <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-[#E0E4EB] px-2 py-2 lg:hidden">
+            {FILTER_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setFilter(opt.key)}
+                className={`shrink-0 rounded-md px-2 py-1 text-[12px] ${
+                  filter === opt.key ? "bg-[#E3EDFC] font-medium text-[#2563EB]" : "bg-[#F7F8FA] text-[#20293B]"
+                }`}
+              >
+                {opt.label} {filterBadgeCount[opt.key]}
+              </button>
+            ))}
+          </div>
           <div className="shrink-0 border-b border-[#E0E4EB] p-2.5">
             <input
               type="search"

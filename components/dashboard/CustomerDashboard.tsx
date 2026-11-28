@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, useCallback, type ChangeEvent, type FormEvent } from "react";
 import Image from "next/image";
 import { BEAUTY_WINDOWS } from "@/lib/beauty/catalog";
 import type {
@@ -78,6 +78,7 @@ export function CustomerDashboard() {
   const [loginPassword, setLoginPassword] = useState("");
   const [tab, setTab] = useState<DashboardTab>("overview");
   const [accountOpen, setAccountOpen] = useState(false);
+  const accountRef = useRef<HTMLDivElement>(null);
 
   // Overview data
   const [overview, setOverview] = useState<CustomerOverview | null>(null);
@@ -256,6 +257,22 @@ export function CustomerDashboard() {
     };
   }, [authenticated]);
 
+  useEffect(() => {
+    if (!accountOpen) return;
+    function onPointerDown(event: MouseEvent) {
+      if (!accountRef.current?.contains(event.target as Node)) setAccountOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setAccountOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [accountOpen]);
+
   async function handleLogin(e: FormEvent) {
     e.preventDefault();
     setBusy("login");
@@ -281,6 +298,7 @@ export function CustomerDashboard() {
   }
 
   async function handleLogout() {
+    setAccountOpen(false);
     const res = await fetch("/api/platform/auth/session", { method: "DELETE" }); if (res.ok) setAuthenticated(false); else setError("登出失敗，請重試");
   }
 
@@ -549,7 +567,7 @@ export function CustomerDashboard() {
 
   // Authenticated Customer Dashboard
   return (
-    <div className="prototype-shell fixed inset-0 flex overflow-hidden bg-white text-[13px] text-[#20293B]">
+    <div className="prototype-shell fixed inset-0 flex flex-col overflow-hidden bg-white text-[13px] text-[#20293B] lg:flex-row">
       <style>{`
         .prototype-shell{--mark-h:36px;--mark-w:calc(var(--mark-h) * 2400 / 1130);--mark-o:calc(var(--mark-h) * 868 / 1130);--mark-cx:calc(var(--mark-h) * 434 / 1130)}
         .orai-logo-reveal{position:absolute;top:0;left:calc(50% - var(--mark-cx));height:var(--mark-h);width:var(--mark-o);overflow:hidden;transition:left 350ms cubic-bezier(0.4, 0, 0.2, 1),width 350ms cubic-bezier(0.4, 0, 0.2, 1)}
@@ -557,13 +575,13 @@ export function CustomerDashboard() {
         .orai-logo-img{display:block;height:var(--mark-h) !important;width:var(--mark-w) !important;max-width:none !important}
         @media (prefers-reduced-motion: reduce){.orai-logo-reveal{transition:none}}
       `}</style>
-      <nav aria-label="功能導航" className="relative z-30 flex h-full w-[144px] shrink-0 flex-col bg-[#F0F3F8] px-2 py-2.5">
-        <div className="orai-logo-slot relative mb-7 h-9 w-full shrink-0">
+      <nav aria-label="功能導航" className="relative z-30 flex h-16 w-full shrink-0 flex-row items-center overflow-x-auto bg-[#F0F3F8] px-2 lg:h-full lg:w-[144px] lg:flex-col lg:items-stretch lg:overflow-visible lg:py-2.5">
+        <div className="orai-logo-slot relative hidden h-9 w-full shrink-0 lg:mb-7 lg:block">
           <div className="orai-logo-reveal">
             <Image src="/prototype/logo-dark-bg.png" alt="orai" width={2400} height={1130} priority unoptimized className="orai-logo-img" />
           </div>
         </div>
-        <div className="flex flex-col gap-0.5">
+        <div className="flex flex-row gap-0.5 lg:flex-col">
           {DASHBOARD_NAV.map((item) => {
             const active = tab === item.id;
             const badge = item.id === "messages" ? pendingMessageCount : item.id === "whatsapp" ? pendingWhatsAppCount : null;
@@ -571,7 +589,10 @@ export function CustomerDashboard() {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setTab(item.id)}
+                onClick={() => {
+                  setAccountOpen(false);
+                  setTab(item.id);
+                }}
                 aria-current={active ? "page" : undefined}
                 className={`group relative flex flex-col items-center gap-1 rounded-md px-1 py-1.5 ${
                   active ? "bg-[#E3EDFC] text-[#2563EB]" : "text-[#7C8798] hover:bg-white/80 hover:text-[#20293B]"
@@ -605,22 +626,24 @@ export function CustomerDashboard() {
               onOpenMessage={openInboxMessage}
               onOpenWhatsApp={openWhatsAppInbox}
             />
-            <button
-              type="button"
-              aria-expanded={accountOpen}
-              aria-label="帳戶選單"
-              onClick={() => setAccountOpen((open) => !open)}
-              className="rounded-md px-2 py-1 text-[12px] text-[#20293B] hover:bg-[#F0F3F8]"
-            >
-              {overview?.organization.name || "商戶"}
-            </button>
-            {accountOpen && (
-              <div className="absolute right-4 top-12 z-40 w-48 rounded-md border border-[#E0E4EB] bg-white p-2 shadow-stripe-sm">
-                <button type="button" onClick={() => void handleLogout()} className="w-full rounded px-2 py-1.5 text-left text-[12px] text-[#20293B] hover:bg-[#F7F8FA]">
-                  登出
-                </button>
-              </div>
-            )}
+            <div ref={accountRef} className="relative">
+              <button
+                type="button"
+                aria-expanded={accountOpen}
+                aria-label="帳戶選單"
+                onClick={() => setAccountOpen((open) => !open)}
+                className="rounded-md px-2 py-1 text-[12px] text-[#20293B] hover:bg-[#F0F3F8]"
+              >
+                {overview?.organization.name || "商戶"}
+              </button>
+              {accountOpen && (
+                <div className="absolute right-0 top-9 z-40 w-48 rounded-md border border-[#E0E4EB] bg-white p-2 shadow-stripe-sm">
+                  <button type="button" onClick={() => void handleLogout()} className="w-full rounded px-2 py-1.5 text-left text-[12px] text-[#20293B] hover:bg-[#F7F8FA]">
+                    登出
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
       <main className={tab === "whatsapp" ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto bg-white p-5"}>
