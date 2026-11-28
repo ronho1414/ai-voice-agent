@@ -514,8 +514,8 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
       <style>{`
         nextjs-portal{display:none !important}
         .prototype-shell{--mark-h:36px;--mark-w:calc(var(--mark-h) * 2400 / 1130);--mark-o:calc(var(--mark-h) * 868 / 1130);--mark-cx:calc(var(--mark-h) * 434 / 1130)}
-        .orai-logo-reveal{position:absolute;top:0;left:calc(50% - var(--mark-cx));height:var(--mark-h);width:var(--mark-o);overflow:hidden;transition:width 350ms cubic-bezier(0.4, 0, 0.2, 1)}
-        .orai-logo-slot:hover .orai-logo-reveal,.orai-logo-slot:focus-within .orai-logo-reveal{width:var(--mark-w)}
+        .orai-logo-reveal{position:absolute;top:0;left:calc(50% - var(--mark-cx));height:var(--mark-h);width:var(--mark-o);overflow:hidden;transition:left 350ms cubic-bezier(0.4, 0, 0.2, 1),width 350ms cubic-bezier(0.4, 0, 0.2, 1)}
+        .orai-logo-slot:hover .orai-logo-reveal,.orai-logo-slot:focus-within .orai-logo-reveal{left:calc(50% - var(--mark-w) / 2);width:var(--mark-w)}
         .orai-logo-img{display:block;height:var(--mark-h) !important;width:var(--mark-w) !important;max-width:none !important}
         @media (prefers-reduced-motion: reduce){.orai-logo-reveal{transition:none}}
       `}</style>
