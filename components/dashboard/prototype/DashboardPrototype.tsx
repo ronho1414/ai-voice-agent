@@ -509,13 +509,14 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
   }
 
   return (
-    <div data-prototype="dashboard" className="fixed inset-0 flex overflow-hidden bg-white text-[13px] text-[#20293B]">
+    <div data-prototype="dashboard" className="prototype-shell fixed inset-0 flex overflow-hidden bg-white text-[13px] text-[#20293B]">
       <style>{`
         nextjs-portal{display:none !important}
-        .orai-logo-slot{--mark-h:40px;--mark-w:calc(var(--mark-h) * 2400 / 1130);--mark-o:calc(var(--mark-h) * 868 / 1130);--mark-cx:calc(var(--mark-h) * 434 / 1130)}
+        .prototype-shell{--rail:88px;--mark-h:40px;--mark-w:calc(var(--mark-h) * 2400 / 1130);--mark-o:calc(var(--mark-h) * 868 / 1130);--mark-cx:calc(var(--mark-h) * 434 / 1130);--logo-clear:calc((var(--rail) / 2) - var(--mark-cx) + var(--mark-w) - var(--rail) + 16px)}
         .orai-logo-reveal{position:absolute;top:0;left:calc(50% - var(--mark-cx));height:var(--mark-h);width:var(--mark-o);overflow:hidden;transition:width 350ms cubic-bezier(0.4, 0, 0.2, 1)}
         .orai-logo-slot:hover .orai-logo-reveal,.orai-logo-slot:focus-within .orai-logo-reveal{width:var(--mark-w)}
         .orai-logo-img{display:block;height:var(--mark-h) !important;width:var(--mark-w) !important;max-width:none !important;max-height:none !important}
+        .prototype-header{padding-left:var(--logo-clear)}
         @media (prefers-reduced-motion: reduce){.orai-logo-reveal{transition:none}}
       `}</style>
       <nav aria-label="功能導航" className="relative z-30 flex h-full w-[88px] shrink-0 flex-col overflow-visible bg-[#F0F3F8] px-1.5 py-2.5">
@@ -573,7 +574,7 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
       </nav>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 shrink-0 items-center justify-between border-b border-[#E0E4EB] bg-white px-4">
+        <header className="prototype-header flex h-12 shrink-0 items-center justify-between border-b border-[#E0E4EB] bg-white pr-4">
           <div className="flex items-center gap-2">
             <h1 className="text-[13px] font-semibold">{current.label}</h1>
             <span className="rounded border border-[#E0E4EB] px-1.5 py-0.5 text-[10px] leading-4 text-[#657084]">視覺原型</span>
