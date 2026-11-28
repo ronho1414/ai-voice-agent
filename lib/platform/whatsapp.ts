@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { ManagedError, managedFailure, readBody, serviceDatabase } from "./managed-agent-service";
+import { isWhatsAppTextInboxEnabled, whatsAppTextInboxDisabledResponse } from "./whatsapp-flag";
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 const MAX_WEBHOOK_BYTES = 2 * 1024 * 1024;
@@ -283,6 +284,7 @@ export async function handleWhatsAppWebhookGet(
   request: Request,
   config: WhatsAppRuntimeConfig = readWhatsAppConfig(),
 ): Promise<Response> {
+  if (!isWhatsAppTextInboxEnabled()) return whatsAppTextInboxDisabledResponse();
   if (!config.verifyToken) {
     return Response.json(
       { ok: false, error: "WhatsApp webhook verification is not configured" },
@@ -371,6 +373,7 @@ export async function handleWhatsAppWebhookPost(
     verifyChannelSignature?: (rawBytes: Uint8Array, signature: string | null, jsonBody: unknown) => Promise<boolean>;
   } = {},
 ): Promise<Response> {
+  if (!isWhatsAppTextInboxEnabled()) return whatsAppTextInboxDisabledResponse();
   const config = options.config ?? readWhatsAppConfig();
   const hasDb = Boolean(
     process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() && process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
@@ -579,6 +582,7 @@ export async function handleAdminWhatsAppSend(
     record?: RecordOutboundWhatsApp;
   } = {},
 ): Promise<Response> {
+  if (!isWhatsAppTextInboxEnabled()) return whatsAppTextInboxDisabledResponse();
   const config = options.config ?? readWhatsAppConfig();
   if (!config.accessToken || !PHONE_NUMBER_ID_RE.test(config.phoneNumberId)) {
     return Response.json(
@@ -905,6 +909,7 @@ export async function handleAdminWhatsAppSend(
 export async function handleAdminWhatsAppStatus(
   config: WhatsAppRuntimeConfig = readWhatsAppConfig(),
 ): Promise<Response> {
+  if (!isWhatsAppTextInboxEnabled()) return whatsAppTextInboxDisabledResponse();
   const dbConfigured = Boolean(
     process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() &&
       process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),

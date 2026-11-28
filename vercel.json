@@ -5,7 +5,8 @@
       "codex/domain-integration": false,
       "codex/elevenlabs-post-call": false,
       "codex/managed-agent-requests": false,
-      "integrate/pr4-pr5-main": false
+      "integrate/pr4-pr5-main": false,
+      "cursor/mvp-whatsapp-flag-21bf": false
     }
   }
 }

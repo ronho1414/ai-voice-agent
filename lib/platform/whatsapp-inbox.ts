@@ -8,6 +8,7 @@ import {
 import { ManagedError, managedFailure, readBody, serviceDatabase, uuid } from "./managed-agent-service";
 import { extractBearerOrSecret } from "./message-service";
 import type { PlatformSession } from "./types";
+import { isWhatsAppTextInboxEnabled, whatsAppTextInboxDisabledResponse } from "./whatsapp-flag";
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -109,6 +110,16 @@ export async function dispatchMetaWhatsAppMessage(params: {
       errorMessage: string;
     }
 > {
+  if (!isWhatsAppTextInboxEnabled()) {
+    return {
+      ok: false,
+      networkError: false,
+      httpStatus: 404,
+      errorCode: "disabled",
+      errorTitle: "disabled",
+      errorMessage: "WhatsApp text inbox is disabled",
+    };
+  }
   const graphVersion = params.graphVersion || configuredGraphVersion();
   const endpoint = `https://graph.facebook.com/${graphVersion}/${params.phoneNumberId}/messages`;
   const fetchFn = params.fetchImpl ?? fetch;
@@ -250,6 +261,9 @@ export async function processPendingWhatsAppJobs(
   abortedByTakeover: number;
   failed: number;
 }> {
+  if (!isWhatsAppTextInboxEnabled()) {
+    return { processed: 0, sent: 0, abortedByTakeover: 0, failed: 0 };
+  }
   const maxJobs = Math.max(1, Math.min(options.maxJobs ?? 6, 20));
   const summary = { processed: 0, sent: 0, abortedByTakeover: 0, failed: 0 };
 
@@ -579,6 +593,7 @@ export async function handleCustomerWhatsAppGet(
   request: Request,
   session: PlatformSession,
 ): Promise<Response> {
+  if (!isWhatsAppTextInboxEnabled()) return whatsAppTextInboxDisabledResponse();
   try {
     const url = new URL(request.url);
     const data = await listCustomerWhatsAppInbox(session, {
@@ -601,6 +616,7 @@ export async function handleCustomerWhatsAppPost(
     readChannelSecrets?: (channelId: string) => Promise<Record<string, unknown> | null>;
   } = {},
 ): Promise<Response> {
+  if (!isWhatsAppTextInboxEnabled()) return whatsAppTextInboxDisabledResponse();
   if (!session.organizationId) {
     return Response.json({ ok: false, error: "此帳戶沒有商戶權限。" }, { status: 403, headers: NO_STORE });
   }
@@ -891,6 +907,7 @@ export function handleCustomerWhatsAppStream(
   request: Request,
   session: PlatformSession,
 ): Response {
+  if (!isWhatsAppTextInboxEnabled()) return whatsAppTextInboxDisabledResponse();
   if (!session.organizationId) {
     return Response.json({ ok: false, error: "此帳戶沒有商戶權限。" }, { status: 403, headers: NO_STORE });
   }
@@ -992,6 +1009,7 @@ export async function handleElevenLabsWhatsAppHandoff(
     escalate?: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
   } = {},
 ): Promise<Response> {
+  if (!isWhatsAppTextInboxEnabled()) return whatsAppTextInboxDisabledResponse();
   const token = extractBearerOrSecret(request);
   if (!token) {
     return Response.json(

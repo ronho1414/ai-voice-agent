@@ -51,7 +51,7 @@ test('indexing requires explicit approval on the official origin, never on stagi
   process.env.NEXT_PUBLIC_SITE_INDEXING = 'true';
   process.env.VERCEL_ENV = 'production';
   assert.equal(isSiteIndexable(), true);
-  assert.deepEqual(sitemap().map(item => item.url), [OFFICIAL_SITE_URL + '/']);
+  assert.deepEqual(sitemap().map(item => item.url), [OFFICIAL_SITE_URL + '/', OFFICIAL_SITE_URL + '/privacy']);
   assert.equal(robots().sitemap, OFFICIAL_SITE_URL + '/sitemap.xml');
   process.env.NEXT_PUBLIC_SITE_URL = 'https://orai-pr4-staging.vercel.app';
   assert.equal(isSiteIndexable(), false);

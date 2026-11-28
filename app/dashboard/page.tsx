@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { CustomerDashboard } from "@/components/dashboard/CustomerDashboard";
+import { isWhatsAppTextInboxEnabled } from "@/lib/platform/whatsapp-flag";
 
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
@@ -8,5 +9,5 @@ export const metadata: Metadata = {
 };
 
 export default function CustomerDashboardPage() {
-  return <CustomerDashboard />;
+  return <CustomerDashboard whatsappTextInboxEnabled={isWhatsAppTextInboxEnabled()} />;
 }

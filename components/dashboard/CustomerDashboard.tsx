@@ -58,7 +58,7 @@ function DashboardIcon({ name, className = "h-5 w-5" }: { name: DashboardIconNam
   );
 }
 
-export function CustomerDashboard() {
+export function CustomerDashboard({ whatsappTextInboxEnabled = false }: { whatsappTextInboxEnabled?: boolean }) {
   const [ready, setReady] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
@@ -207,7 +207,9 @@ export function CustomerDashboard() {
       try {
         const [msgRes, waRes] = await Promise.all([
           fetch("/api/platform/customer/messages?page=1", { cache: "no-store" }),
-          fetch("/api/platform/customer/whatsapp", { cache: "no-store" }),
+          whatsappTextInboxEnabled
+            ? fetch("/api/platform/customer/whatsapp", { cache: "no-store" })
+            : Promise.resolve(null),
         ]);
         if (msgRes.ok) {
           const body = await msgRes.json();
@@ -216,7 +218,7 @@ export function CustomerDashboard() {
             setPendingMessageCount(pending);
           }
         }
-        if (waRes.ok) {
+        if (waRes?.ok) {
           const waBody = await waRes.json();
           const unreadWa = waBody?.counts?.unread;
           if (!cancelled && typeof unreadWa === "number") {
@@ -240,7 +242,7 @@ export function CustomerDashboard() {
       window.clearInterval(timer);
       window.removeEventListener(MANAGED_REFRESH_EVENT, onRefresh);
     };
-  }, [authenticated]);
+  }, [authenticated, whatsappTextInboxEnabled]);
 
   async function handleLogin(e: FormEvent) {
     e.preventDefault();
@@ -605,6 +607,7 @@ export function CustomerDashboard() {
             )}
           </button>
 
+          {whatsappTextInboxEnabled && (
           <button
             type="button"
             onClick={() => setTab("whatsapp")}
@@ -625,6 +628,7 @@ export function CustomerDashboard() {
               </span>
             )}
           </button>
+          )}
 
           <button
             type="button"
@@ -679,7 +683,7 @@ export function CustomerDashboard() {
             <NotificationBell
               onOpenRequest={openManagedRequest}
               onOpenMessage={openInboxMessage}
-              onOpenWhatsApp={openWhatsAppInbox}
+              onOpenWhatsApp={whatsappTextInboxEnabled ? openWhatsAppInbox : undefined}
             />
             <span className="rounded-full bg-sky-100 px-3 py-1 text-[11px] font-bold text-sky-700">商戶專屬</span>
           </div>
@@ -1315,7 +1319,7 @@ export function CustomerDashboard() {
           />
         )}
 
-        {tab === "whatsapp" && (
+        {whatsappTextInboxEnabled && tab === "whatsapp" && (
           <WhatsAppInboxPanel
             initialConversationId={focusWhatsAppId}
             onConversationHandled={clearFocusWhatsApp}
