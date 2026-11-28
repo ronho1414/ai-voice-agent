@@ -9,6 +9,7 @@ import {
   POST as customerWhatsAppPost,
 } from "../app/api/platform/customer/whatsapp/route";
 import { GET as customerWhatsAppStreamGet } from "../app/api/platform/customer/whatsapp/stream/route";
+import { GET as customerWhatsAppMediaGet } from "../app/api/platform/customer/whatsapp/media/route";
 import { POST as whatsappHandoffPost } from "../app/api/tools/elevenlabs/whatsapp-handoff/route";
 import { GET as notificationsGet } from "../app/api/platform/notifications/route";
 import { generateElevenLabsTextReply } from "../lib/platform/elevenlabs-text";
@@ -287,6 +288,7 @@ before(async () => {
     "20261127020000_orai_first_party_tenant.sql",
     "20261127060000_staged_credential_rotation.sql",
     "20261127080000_whatsapp_live_inbox.sql",
+    "20261128100000_whatsapp_voice_notes.sql",
   ]) {
     const sql = await readFile(
       new URL(`../supabase/migrations/${file}`, import.meta.url),
@@ -397,7 +399,15 @@ before(async () => {
       }
     }
     if (url.origin === "https://graph.facebook.com") {
-      const reqBody = JSON.parse(String(options?.body));
+      if (typeof FormData !== "undefined" && options?.body instanceof FormData) {
+        metaGraphCalls.push({
+          url: url.href,
+          body: { upload: "audio/ogg" },
+          auth: headers.get("authorization") || "",
+        });
+        return Response.json({ id: `media.upload_${nextMetaIdSeq++}` });
+      }
+      const reqBody = options?.body ? JSON.parse(String(options.body)) : {};
       metaGraphCalls.push({ url: url.href, body: reqBody, auth: headers.get("authorization") || "" });
       if (metaForceError) {
         return Response.json({ error: { code: 131047, type: "OAuthException", message: "Window expired" } }, { status: 400 });
@@ -941,4 +951,257 @@ test("In-flight Meta dispatch before Take Over audits dispatched_before_takeover
     [conv.id],
   );
   assert.equal(auditRows.length, 1);
+});
+
+function monoVoiceNote(channels = 1): Uint8Array {
+  const bytes = new Uint8Array(64);
+  bytes.set([0x4f, 0x67, 0x67, 0x53], 0);
+  bytes.set(Buffer.from("OpusHead"), 28);
+  bytes[36] = 1;
+  bytes[37] = channels;
+  return bytes;
+}
+
+async function inboundVoice(waId: string, wamid: string) {
+  const raw = JSON.stringify(
+    makeInboundWebhookPayload({
+      phoneNumberId: hkOraiPhoneId,
+      wamid,
+      from: waId,
+      name: "語音客戶",
+      type: "audio",
+    }),
+  );
+  const response = await handleWhatsAppWebhookPost(
+    new Request(`${base}/api/webhooks/whatsapp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-hub-signature-256": signWebhook(raw) },
+      body: raw,
+    }),
+  );
+  assert.equal(response.status, 200);
+  const { rows } = await db.query<{ id: string }>(
+    `select id from public.whatsapp_conversations where customer_wa_id = $1`,
+    [waId],
+  );
+  return rows[0].id;
+}
+
+test("voice notes transcribe once, reply with a WhatsApp voice message, and keep the transcript", async () => {
+  await db.query(`update public.whatsapp_channels set reply_preference = 'auto' where phone_number_id = $1`, [
+    hkOraiPhoneId,
+  ]);
+  const convId = await inboundVoice("85290000011", "wamid.voice.11");
+  let scribeCalls = 0;
+  let ttsCalls = 0;
+  metaGraphCalls = [];
+  const first = await processPendingWhatsAppJobs({
+    conversationId: convId,
+    maxJobs: 2,
+    generateReply: async (input) => {
+      assert.equal(input.unhandledCustomerMessages[0], "我想聽語音");
+      return { replyText: "好呀，我而家用語音回覆。", elevenlabsConversationId: "el_voice" };
+    },
+    transcribeVoice: async (input) => {
+      scribeCalls += 1;
+      assert.equal(input.agentLanguageMode, "trilingual");
+      return { ok: true, transcript: "我想聽語音", skipped: false, language: "yue", audioSeconds: 2.25 };
+    },
+    synthesizeVoice: async () => {
+      ttsCalls += 1;
+      return { ok: true, audio: monoVoiceNote(), characters: 12, modelId: "eleven_flash_v2_5" };
+    },
+    uploadVoice: async () => ({ ok: true, mediaId: "uploaded-voice-11" }),
+  });
+  assert.equal(first.sent, 1);
+  assert.equal(scribeCalls, 1);
+  assert.equal(ttsCalls, 1);
+  const audioCall = metaGraphCalls.find((call) => call.body.type === "audio");
+  assert.equal(audioCall?.body.type, "audio");
+  assert.deepEqual(audioCall?.body.audio, { id: "uploaded-voice-11", voice: true });
+  assert.equal(audioCall?.auth, `Bearer ${fakeChannelAccessToken}`);
+
+  const { rows } = await db.query<{
+    body_text: string;
+    message_type: string;
+    metadata: { delivery?: string; usage?: { stt_audio_seconds?: number }; latency_ms?: { e2e?: number } };
+    media_metadata: { has_playback?: boolean; stt?: { status?: string } };
+  }>(
+    `select direction, message_type, body_text, metadata, media_metadata
+     from public.whatsapp_messages where whatsapp_conversation_id = $1 order by created_at asc`,
+    [convId],
+  );
+  assert.equal(rows[0].body_text, "我想聽語音");
+  assert.equal(rows[0].media_metadata.stt?.status, "done");
+  assert.equal(rows[1].message_type, "audio");
+  assert.equal(rows[1].body_text, "好呀，我而家用語音回覆。");
+  assert.equal(rows[1].metadata.delivery, "voice");
+  assert.equal(rows[1].metadata.usage?.stt_audio_seconds, 2.25);
+  assert.equal(typeof rows[1].metadata.latency_ms?.e2e, "number");
+  assert.equal(rows[1].media_metadata.has_playback, true);
+
+  const second = await processPendingWhatsAppJobs({
+    conversationId: convId,
+    transcribeVoice: async () => {
+      scribeCalls += 1;
+      return { ok: false, reason: "stt_failed" };
+    },
+    synthesizeVoice: async () => {
+      ttsCalls += 1;
+      return { ok: false };
+    },
+  });
+  assert.equal(second.sent, 0);
+  assert.equal(scribeCalls, 1);
+  assert.equal(ttsCalls, 1);
+
+  const oraiCookie = await loginAs("orai@example.test");
+  const salonCookie = await loginAs("salona@example.test");
+  const { rows: outbound } = await db.query<{ id: string }>(
+    `select id from public.whatsapp_messages where whatsapp_conversation_id = $1 and direction = 'outbound'`,
+    [convId],
+  );
+  const ownerAudio = await customerWhatsAppMediaGet(
+    new Request(`${base}/api/platform/customer/whatsapp/media?messageId=${outbound[0].id}`, {
+      headers: { cookie: oraiCookie },
+    }),
+  );
+  assert.equal(ownerAudio.status, 200);
+  assert.equal(ownerAudio.headers.get("content-type"), "audio/ogg");
+  const otherTenant = await customerWhatsAppMediaGet(
+    new Request(`${base}/api/platform/customer/whatsapp/media?messageId=${outbound[0].id}`, {
+      headers: { cookie: salonCookie },
+    }),
+  );
+  assert.equal(otherTenant.status, 404);
+});
+
+test("reply preference, TTS failure, takeover recheck, and transcript reuse stay fail-closed", async () => {
+  await db.query(`update public.whatsapp_channels set reply_preference = 'text' where phone_number_id = $1`, [
+    hkOraiPhoneId,
+  ]);
+  const textOnlyConv = await inboundVoice("85290000012", "wamid.voice.12");
+  let ttsCalls = 0;
+  metaGraphCalls = [];
+  const textOnly = await processPendingWhatsAppJobs({
+    conversationId: textOnlyConv,
+    generateReply: async (input) => {
+      assert.equal(input.unhandledCustomerMessages[0], "只回文字");
+      return { replyText: "文字回覆", elevenlabsConversationId: null };
+    },
+    transcribeVoice: async () => ({ ok: true, transcript: "只回文字", skipped: false, language: "zh", audioSeconds: 1 }),
+    synthesizeVoice: async () => {
+      ttsCalls += 1;
+      return { ok: true, audio: monoVoiceNote(), characters: 4, modelId: "eleven_flash_v2_5" };
+    },
+  });
+  assert.equal(textOnly.sent, 1);
+  assert.equal(ttsCalls, 0);
+  assert.equal(metaGraphCalls.at(-1)?.body.type, "text");
+
+  await db.query(`update public.whatsapp_channels set reply_preference = 'voice' where phone_number_id = $1`, [
+    hkOraiPhoneId,
+  ]);
+  const raw = JSON.stringify(
+    makeInboundWebhookPayload({
+      phoneNumberId: hkOraiPhoneId,
+      wamid: "wamid.voice.13",
+      from: "85290000013",
+      name: "文字客戶",
+      type: "text",
+      body: "請用語音答我",
+    }),
+  );
+  assert.equal(
+    (
+      await handleWhatsAppWebhookPost(
+        new Request(`${base}/api/webhooks/whatsapp`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-hub-signature-256": signWebhook(raw) },
+          body: raw,
+        }),
+      )
+    ).status,
+    200,
+  );
+  const { rows: voicePrefRows } = await db.query<{ id: string }>(
+    `select id from public.whatsapp_conversations where customer_wa_id = '85290000013'`,
+  );
+  metaGraphCalls = [];
+  const voicePref = await processPendingWhatsAppJobs({
+    conversationId: voicePrefRows[0].id,
+    generateReply: async () => ({ replyText: "語音回覆", elevenlabsConversationId: null }),
+    synthesizeVoice: async () => ({ ok: false }),
+  });
+  assert.equal(voicePref.sent, 1);
+  assert.equal(metaGraphCalls.at(-1)?.body.type, "text");
+
+  const cachedConv = await inboundVoice("85290000014", "wamid.voice.14");
+  await db.query(
+    `update public.whatsapp_messages
+        set body_text = '已轉寫',
+            media_metadata = media_metadata || '{"stt":{"status":"done","language":"en"}}'::jsonb
+      where whatsapp_conversation_id = $1 and direction = 'inbound'`,
+    [cachedConv],
+  );
+  let scribeCalls = 0;
+  const reused = await processPendingWhatsAppJobs({
+    conversationId: cachedConv,
+    generateReply: async (input) => {
+      assert.equal(input.unhandledCustomerMessages[0], "已轉寫");
+      return { replyText: "收到", elevenlabsConversationId: null };
+    },
+    transcribeVoice: async () => {
+      scribeCalls += 1;
+      return { ok: false, reason: "stt_failed" };
+    },
+    synthesizeVoice: async () => ({ ok: true, audio: monoVoiceNote(), characters: 2, modelId: "eleven_flash_v2_5" }),
+    uploadVoice: async () => ({ ok: true, mediaId: "should-not-upload" }),
+    recheckAiSend: async () => ({ ok: false, action: "aborted_by_takeover" }),
+  });
+  assert.equal(scribeCalls, 0);
+  assert.equal(reused.sent, 0);
+  assert.equal(reused.abortedByTakeover, 1);
+  assert.equal(metaGraphCalls.some((call) => call.body.audio), false);
+  const { rows: blocked } = await db.query<{ error_code: string }>(
+    `select error_code from public.whatsapp_messages
+      where whatsapp_conversation_id = $1 and direction = 'outbound'`,
+    [cachedConv],
+  );
+  assert.equal(blocked[0].error_code, "TAKEOVER_BEFORE_AUDIO");
+
+  await db.query(
+    `update private.whatsapp_voice_media set retain_until = now() - interval '1 minute' where organization_id = $1`,
+    [orgOrai],
+  );
+  const purged = (await runRpc("purge_expired_whatsapp_voice_media", { payload: {} })) as { deleted: number };
+  assert.ok(purged.deleted >= 1);
+
+  const oraiCookie = await loginAs("orai@example.test");
+  const salonCookie = await loginAs("salona@example.test");
+  const { rows: channels } = await db.query<{ id: string }>(
+    `select id from public.whatsapp_channels where phone_number_id = $1`,
+    [hkOraiPhoneId],
+  );
+  const denied = await customerWhatsAppPost(
+    new Request(`${base}/api/platform/customer/whatsapp`, {
+      method: "POST",
+      headers: { origin: base, cookie: salonCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set_reply_preference", channelId: channels[0].id, preference: "voice" }),
+    }),
+  );
+  assert.equal(denied.status, 403);
+  const allowed = await customerWhatsAppPost(
+    new Request(`${base}/api/platform/customer/whatsapp`, {
+      method: "POST",
+      headers: { origin: base, cookie: oraiCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set_reply_preference", channelId: channels[0].id, preference: "auto" }),
+    }),
+  );
+  assert.equal(allowed.status, 200);
+  const { rows: pref } = await db.query<{ reply_preference: string }>(
+    `select reply_preference from public.whatsapp_channels where id = $1`,
+    [channels[0].id],
+  );
+  assert.equal(pref[0].reply_preference, "auto");
 });

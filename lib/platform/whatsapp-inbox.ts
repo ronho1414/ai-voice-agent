@@ -8,6 +8,21 @@ import {
 import { ManagedError, managedFailure, readBody, serviceDatabase, uuid } from "./managed-agent-service";
 import { extractBearerOrSecret } from "./message-service";
 import type { PlatformSession } from "./types";
+import {
+  decideReplyKind,
+  existingVoiceTranscript,
+  parseReplyPreference,
+  purgeExpiredVoiceMedia,
+  recheckWhatsAppAiSend,
+  recordVoiceTranscript,
+  retargetQueuedOutbound,
+  storeOutboundVoice,
+  synthesizeAgentVoiceNote,
+  transcribeWhatsAppVoiceNote,
+  uploadWhatsAppVoiceNote,
+  voiceFailureMessage,
+  type VoiceTranscriptResult,
+} from "./whatsapp-voice";
 
 const NO_STORE = { "Cache-Control": "no-store" } as const;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -237,6 +252,10 @@ export type WhatsAppJobRunnerDeps = {
   readChannelSecrets?: (channelId: string) => Promise<Record<string, unknown> | null>;
   generateReply?: (input: GenerateElevenLabsTextReplyInput) => Promise<GenerateElevenLabsTextReplyResult>;
   fetchImpl?: typeof fetch;
+  transcribeVoice?: typeof transcribeWhatsAppVoiceNote;
+  synthesizeVoice?: typeof synthesizeAgentVoiceNote;
+  uploadVoice?: typeof uploadWhatsAppVoiceNote;
+  recheckAiSend?: typeof recheckWhatsAppAiSend;
 };
 
 export async function processPendingWhatsAppJobs(
@@ -296,6 +315,11 @@ export async function processPendingWhatsAppJobs(
     });
 
   const generateReplyFn = options.generateReply ?? generateElevenLabsTextReply;
+  const transcribeFn = options.transcribeVoice ?? transcribeWhatsAppVoiceNote;
+  const synthesizeFn = options.synthesizeVoice ?? synthesizeAgentVoiceNote;
+  const uploadFn = options.uploadVoice ?? uploadWhatsAppVoiceNote;
+  const recheckFn = options.recheckAiSend ?? recheckWhatsAppAiSend;
+  await purgeExpiredVoiceMedia();
 
   for (let i = 0; i < maxJobs; i += 1) {
     const claimed = await claimFn(options.conversationId ?? null);
@@ -342,11 +366,15 @@ export async function processPendingWhatsAppJobs(
         createdAt: typeof row.created_at === "string" ? row.created_at : null,
       }));
 
-    const unhandledTexts = unhandled.map((m) => describeMessageForAi(m));
     const lastUnhandled = unhandled[unhandled.length - 1];
     const lastMsgAt = typeof lastUnhandled.created_at === "string" ? lastUnhandled.created_at : new Date().toISOString();
     const lastMsgId = typeof lastUnhandled.id === "string" ? lastUnhandled.id : "";
+    const lastInboundType = typeof lastUnhandled.message_type === "string" ? lastUnhandled.message_type : "text";
+    const organizationId = typeof conv.organization_id === "string" ? conv.organization_id : "";
+    const replyKind = decideReplyKind(parseReplyPreference(channel.reply_preference), lastInboundType);
+    const agentLanguageMode = typeof claimed.agent_language_mode === "string" ? claimed.agent_language_mode : "";
 
+    const turnStarted = Date.now();
     let aiResult: GenerateElevenLabsTextReplyResult;
     try {
       const creds = await resolveChannelCredentials(channel, options.readChannelSecrets);
@@ -354,6 +382,62 @@ export async function processPendingWhatsAppJobs(
         throw new ManagedError("Channel Meta access token is not configured", 503);
       }
 
+      const sttStarted = Date.now();
+      let sttAudioSeconds = 0;
+      let sttLanguage: string | null = null;
+      let voiceBlocked: VoiceTranscriptResult | null = null;
+      const unhandledTexts: string[] = [];
+      for (const message of unhandled) {
+        const messageType = typeof message.message_type === "string" ? message.message_type : "";
+        if (messageType !== "audio") {
+          unhandledTexts.push(describeMessageForAi(message));
+          continue;
+        }
+        const cached = existingVoiceTranscript(message);
+        if (cached) {
+          unhandledTexts.push(cached);
+          continue;
+        }
+        const transcribed = await transcribeFn({
+          message,
+          organizationId,
+          accessToken: creds.accessToken,
+          graphVersion: creds.graphVersion,
+          agentLanguageMode,
+          fetchImpl: options.fetchImpl,
+        });
+        if (!transcribed.ok) {
+          voiceBlocked = transcribed;
+          break;
+        }
+        const messageId = typeof message.id === "string" ? message.id : "";
+        if (!transcribed.skipped && messageId) {
+          const saved = await recordVoiceTranscript({
+            messageId,
+            organizationId,
+            transcript: transcribed.transcript,
+            language: transcribed.language,
+            audioSeconds: transcribed.audioSeconds,
+          });
+          if (!saved.ok) {
+            voiceBlocked = { ok: false, reason: "persist_failed" };
+            break;
+          }
+          unhandledTexts.push(saved.transcript);
+        } else {
+          unhandledTexts.push(transcribed.transcript);
+        }
+        if (!transcribed.skipped && transcribed.audioSeconds) sttAudioSeconds += transcribed.audioSeconds;
+        if (transcribed.language) sttLanguage = transcribed.language;
+      }
+      const sttMs = Date.now() - sttStarted;
+      if (voiceBlocked && !voiceBlocked.ok) {
+        await failJobFn(jobId, "failed", voiceFailureMessage(voiceBlocked.reason));
+        summary.failed += 1;
+        continue;
+      }
+
+      const agentStarted = Date.now();
       aiResult = await generateReplyFn({
         agentId: elevenlabsAgentId,
         conversationHistory: historyTurns,
@@ -365,6 +449,7 @@ export async function processPendingWhatsAppJobs(
           whatsapp_customer_name: typeof conv.customer_name === "string" ? conv.customer_name : "",
         },
       });
+      const agentMs = Date.now() - agentStarted;
 
       const cleanReply = aiResult.replyText.trim().slice(0, 4096);
       if (!cleanReply) {
@@ -372,14 +457,47 @@ export async function processPendingWhatsAppJobs(
         continue;
       }
 
+      let outboundType: "text" | "audio" = "text";
+      let voiceAudio: Uint8Array | null = null;
+      let ttsCharacters = 0;
+      let ttsModel = "";
+      let ttsFallback = false;
+      const ttsStarted = Date.now();
+      if (replyKind === "voice") {
+        const spoken = await synthesizeFn({
+          agentId: elevenlabsAgentId,
+          text: cleanReply,
+          fetchImpl: options.fetchImpl,
+        });
+        if (spoken.ok) {
+          outboundType = "audio";
+          voiceAudio = spoken.audio;
+          ttsCharacters = spoken.characters;
+          ttsModel = spoken.modelId;
+        } else {
+          ttsFallback = true;
+        }
+      }
+      const ttsMs = replyKind === "voice" ? Date.now() - ttsStarted : 0;
+
       const idempotencyKey = `ai:${jobId}`;
       const payloadHash = sha256Hex(
         JSON.stringify({
           conversationId: convId,
           jobId,
           replyText: cleanReply,
+          outboundType,
         }),
       );
+
+      const usage = {
+        stt_audio_seconds: sttAudioSeconds,
+        stt_language: sttLanguage,
+        tts_characters: ttsCharacters,
+        tts_model: ttsModel || null,
+        agent_text_turns: 1,
+        tts_fallback: ttsFallback,
+      };
 
       const reserve = await reserveAiFn({
         job_id: jobId,
@@ -388,6 +506,8 @@ export async function processPendingWhatsAppJobs(
         processed_until_at: lastMsgAt,
         processed_last_msg_id: lastMsgId,
         body_text: cleanReply,
+        message_type: outboundType,
+        media_metadata: outboundType === "audio" ? { voice: true, mime_type: "audio/ogg" } : {},
         idempotency_key: idempotencyKey,
         payload_hash: payloadHash,
         elevenlabs_conversation_id: aiResult.elevenlabsConversationId || "",
@@ -395,6 +515,8 @@ export async function processPendingWhatsAppJobs(
           elevenlabs_agent_id: elevenlabsAgentId,
           elevenlabs_conversation_id: aiResult.elevenlabsConversationId || null,
           source: "orai_whatsapp_ai_worker",
+          delivery: outboundType === "audio" ? "voice" : "text",
+          usage,
         },
       });
 
@@ -411,20 +533,105 @@ export async function processPendingWhatsAppJobs(
       const phoneNumberId = typeof conv.phone_number_id === "string" ? conv.phone_number_id : "";
       const recipientWaId = typeof conv.customer_wa_id === "string" ? conv.customer_wa_id : "";
 
-      const metaRes = await dispatchMetaWhatsAppMessage({
-        phoneNumberId,
-        accessToken: creds.accessToken,
-        graphVersion: creds.graphVersion,
-        fetchImpl: options.fetchImpl,
-        payload: {
-          messaging_product: "whatsapp",
-          recipient_type: "individual",
-          to: recipientWaId,
-          type: "text",
-          text: { preview_url: false, body: cleanReply },
-        },
-      });
+      const textPayload = {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: recipientWaId,
+        type: "text",
+        text: { preview_url: false, body: cleanReply },
+      };
 
+      let metaRes: Awaited<ReturnType<typeof dispatchMetaWhatsAppMessage>> | null = null;
+      if (outboundType === "audio" && voiceAudio) {
+        const stopForTakeover = async (action: string) => {
+          await finalizeFn({
+            id: reservedId,
+            status: "failed",
+            error_code: action === "outside_window" ? "WINDOW_24H_EXPIRED" : "TAKEOVER_BEFORE_AUDIO",
+            error_title: action === "outside_window" ? "24h Window" : "Takeover",
+            error_message:
+              action === "outside_window"
+                ? "距離客戶最後一次回覆已超過 24 小時，未送出語音。"
+                : "真人已接管，未送出 AI 語音。",
+            metadata: { delivery: "voice", usage, blocked: action },
+          });
+          if (action === "aborted_by_takeover") summary.abortedByTakeover += 1;
+          else summary.failed += 1;
+        };
+
+        const gate = await recheckFn({ conversationId: convId, expectedModeVersion });
+        if (!gate || gate.ok !== true) {
+          await stopForTakeover(typeof gate?.action === "string" ? gate.action : "aborted_by_takeover");
+          continue;
+        }
+
+        const uploaded = await uploadFn({
+          phoneNumberId,
+          accessToken: creds.accessToken,
+          graphVersion: creds.graphVersion,
+          audio: voiceAudio,
+          fetchImpl: options.fetchImpl,
+        });
+        if (!uploaded.ok) {
+          ttsFallback = true;
+          outboundType = "text";
+          await retargetQueuedOutbound({
+            messageId: reservedId,
+            messageType: "text",
+            mediaMetadata: { has_playback: false, voice_fallback: "upload_failed" },
+          });
+        } else {
+          const gateBeforeSend = await recheckFn({ conversationId: convId, expectedModeVersion });
+          if (!gateBeforeSend || gateBeforeSend.ok !== true) {
+            await stopForTakeover(
+              typeof gateBeforeSend?.action === "string" ? gateBeforeSend.action : "aborted_by_takeover",
+            );
+            continue;
+          }
+          metaRes = await dispatchMetaWhatsAppMessage({
+            phoneNumberId,
+            accessToken: creds.accessToken,
+            graphVersion: creds.graphVersion,
+            fetchImpl: options.fetchImpl,
+            payload: {
+              messaging_product: "whatsapp",
+              recipient_type: "individual",
+              to: recipientWaId,
+              type: "audio",
+              audio: { id: uploaded.mediaId, voice: true },
+            },
+          });
+          if (!metaRes.ok) {
+            ttsFallback = true;
+            outboundType = "text";
+            metaRes = null;
+            await retargetQueuedOutbound({
+              messageId: reservedId,
+              messageType: "text",
+              mediaMetadata: { has_playback: false, voice_fallback: "send_failed" },
+            });
+          } else {
+            await storeOutboundVoice({ messageId: reservedId, organizationId, audio: voiceAudio });
+          }
+        }
+      }
+
+      if (!metaRes) {
+        metaRes = await dispatchMetaWhatsAppMessage({
+          phoneNumberId,
+          accessToken: creds.accessToken,
+          graphVersion: creds.graphVersion,
+          fetchImpl: options.fetchImpl,
+          payload: textPayload,
+        });
+      }
+
+      const latency = {
+        stt: sttMs,
+        agent: agentMs,
+        tts: ttsMs,
+        e2e: Date.now() - turnStarted,
+      };
       if (!metaRes.ok) {
         await finalizeFn({
           id: reservedId,
@@ -432,7 +639,13 @@ export async function processPendingWhatsAppJobs(
           error_code: metaRes.errorCode,
           error_title: metaRes.errorTitle,
           error_message: metaRes.errorMessage,
-          metadata: { graph_version: creds.graphVersion, http_status: metaRes.httpStatus },
+          metadata: {
+            graph_version: creds.graphVersion,
+            http_status: metaRes.httpStatus,
+            delivery: outboundType === "audio" ? "voice" : "text",
+            usage: { ...usage, tts_fallback: ttsFallback },
+            latency_ms: latency,
+          },
         });
         summary.failed += 1;
       } else {
@@ -440,7 +653,13 @@ export async function processPendingWhatsAppJobs(
           id: reservedId,
           status: "sent",
           wa_message_id: metaRes.waMessageId,
-          metadata: { graph_version: creds.graphVersion, messaging_product: "whatsapp" },
+          metadata: {
+            graph_version: creds.graphVersion,
+            messaging_product: "whatsapp",
+            delivery: outboundType === "audio" ? "voice" : "text",
+            usage: { ...usage, tts_fallback: ttsFallback },
+            latency_ms: latency,
+          },
         });
         summary.sent += 1;
       }
@@ -480,7 +699,7 @@ export async function listCustomerWhatsAppInbox(
       .limit(100),
     db
       .from("whatsapp_channels")
-      .select("id,phone_number_id,display_phone,country_code,ai_auto_reply_enabled,is_active")
+      .select("id,phone_number_id,display_phone,country_code,ai_auto_reply_enabled,is_active,reply_preference")
       .eq("scope", "merchant")
       .eq("organization_id", orgId)
       .eq("is_active", true),
@@ -575,6 +794,43 @@ export async function listCustomerWhatsAppInbox(
   };
 }
 
+export async function handleCustomerWhatsAppMediaGet(
+  request: Request,
+  session: PlatformSession,
+): Promise<Response> {
+  if (!session.organizationId) {
+    return Response.json({ ok: false, error: "此帳戶沒有商戶權限。" }, { status: 403, headers: NO_STORE });
+  }
+  const messageId = new URL(request.url).searchParams.get("messageId") || "";
+  if (!UUID_RE.test(messageId)) {
+    return Response.json({ ok: false, error: "缺少訊息識別碼。" }, { status: 400, headers: NO_STORE });
+  }
+  const { data, error } = await serviceDatabase().rpc("read_whatsapp_voice_media", {
+    payload: {
+      actor_id: session.userId,
+      tenant_id: session.organizationId,
+      message_id: messageId,
+    },
+  });
+  const result = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+  if (error || !result || result.ok !== true || typeof result.audio_base64 !== "string") {
+    const code = result && typeof result.error_code === "string" ? result.error_code : "";
+    const status = code === "unauthorized" ? 403 : code === "expired" ? 410 : 404;
+    return Response.json({ ok: false, error: "無法讀取語音。" }, { status, headers: NO_STORE });
+  }
+  const bytes = Buffer.from(result.audio_base64, "base64");
+  const body = new Uint8Array(bytes);
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": "audio/ogg",
+      "Content-Length": String(body.byteLength),
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
 export async function handleCustomerWhatsAppGet(
   request: Request,
   session: PlatformSession,
@@ -649,6 +905,35 @@ export async function handleCustomerWhatsAppPost(
         },
         { status: 200, headers: NO_STORE },
       );
+    } catch (err) {
+      return managedFailure(err);
+    }
+  }
+
+  if (action === "set_reply_preference") {
+    try {
+      const channelId = uuid(body.channelId);
+      const preference = typeof body.preference === "string" ? body.preference.trim() : "";
+      if (preference !== "auto" && preference !== "text" && preference !== "voice") {
+        throw new ManagedError("回覆偏好只可以是 auto、text 或 voice。", 400);
+      }
+      const { data, error } = await db.rpc("set_whatsapp_reply_preference", {
+        payload: {
+          actor_id: session.userId,
+          tenant_id: orgId,
+          channel_id: channelId,
+          preference,
+        },
+      });
+      const result = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+      if (error || !result || result.ok !== true) {
+        const code = result && typeof result.error_code === "string" ? result.error_code : "";
+        if (code === "unauthorized" || code === "not_found") {
+          throw new ManagedError("找不到該 WhatsApp 通道或沒有操作權限。", 403);
+        }
+        throw new ManagedError("未能更新回覆偏好。", 400);
+      }
+      return Response.json({ ok: true, preference: result.preference }, { status: 200, headers: NO_STORE });
     } catch (err) {
       return managedFailure(err);
     }

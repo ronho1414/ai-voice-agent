@@ -63,6 +63,7 @@ type ListResponse = {
     phone_number_id: string;
     display_phone: string;
     ai_auto_reply_enabled: boolean;
+    reply_preference?: "auto" | "text" | "voice" | string;
   }>;
   selected: {
     conversation: ConversationItem;
@@ -136,7 +137,7 @@ function renderMessageBody(msg: MessageItem): { label?: string; text: string } {
     case "image":
       return { label: "圖片訊息", text: clean || "（客戶傳送了一張圖片，第一階段僅支援檢視文字摘要）" };
     case "audio":
-      return { label: "語音訊息", text: clean || "（客戶傳送了一段語音訊息，待音訊播放器擴展）" };
+      return { label: "語音訊息", text: clean || "（語音轉寫尚未完成）" };
     case "document": {
       const filename = typeof meta.filename === "string" ? meta.filename : "";
       return { label: "文件檔案", text: clean || (filename ? `檔案：${filename}` : "（客戶傳送了一份文件檔案）") };
@@ -177,6 +178,7 @@ export function WhatsAppInboxPanel({
     resolved: 0,
   });
   const [channelsCount, setChannelsCount] = useState(0);
+  const [channels, setChannels] = useState<ListResponse["channels"]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(initialConversationId ?? null);
   const [selectedConv, setSelectedConv] = useState<ConversationItem | null>(null);
   const [messages, setMessages] = useState<MessageItem[]>([]);
@@ -226,6 +228,7 @@ export function WhatsAppInboxPanel({
 
         setConversations(data.conversations ?? []);
         setCounts(data.counts);
+        setChannels(Array.isArray(data.channels) ? data.channels : []);
         setChannelsCount(Array.isArray(data.channels) ? data.channels.length : 0);
         onCountsChange?.(data.counts);
 
@@ -728,6 +731,57 @@ export function WhatsAppInboxPanel({
                     >
                       Mark Unread
                     </button>
+                    {(() => {
+                      const channel = channels.find((item) => item.phone_number_id === selectedConv.phone_number_id);
+                      if (!channel) return null;
+                      const preference = channel.reply_preference === "text" || channel.reply_preference === "voice"
+                        ? channel.reply_preference
+                        : "auto";
+                      return (
+                        <label className="inline-flex items-center gap-2 text-[11px] font-bold text-[#52525B]">
+                          回覆
+                          <select
+                            value={preference}
+                            disabled={Boolean(busyAction)}
+                            onChange={(event) => {
+                              const next = event.target.value;
+                              if (next !== "auto" && next !== "text" && next !== "voice") return;
+                              setBusyAction("reply_preference");
+                              void fetch("/api/platform/customer/whatsapp", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  action: "set_reply_preference",
+                                  channelId: channel.id,
+                                  preference: next,
+                                }),
+                              })
+                                .then(async (res) => {
+                                  const data = (await res.json()) as { ok?: boolean; error?: string };
+                                  if (!res.ok || !data.ok) throw new Error(data.error || "未能更新回覆偏好");
+                                  setNotice(
+                                    next === "text"
+                                      ? "此號碼改為只回文字。"
+                                      : next === "voice"
+                                        ? "此號碼改為只回語音。合成失敗時會改回文字。"
+                                        : "此號碼改為自動：文字回文字，語音回語音。",
+                                  );
+                                  await loadInbox(selectedConv.id, true);
+                                })
+                                .catch((err: unknown) => {
+                                  setError(err instanceof Error ? err.message : "未能更新回覆偏好");
+                                })
+                                .finally(() => setBusyAction(""));
+                            }}
+                            className="rounded-lg border border-[#E4E4E7] bg-white px-2 py-1.5 text-xs font-bold text-[#09090B]"
+                          >
+                            <option value="auto">自動</option>
+                            <option value="text">只回文字</option>
+                            <option value="voice">只回語音</option>
+                          </select>
+                        </label>
+                      );
+                    })()}
                   </div>
                 </div>
 
@@ -789,6 +843,14 @@ export function WhatsAppInboxPanel({
                                 : "border border-sky-200 bg-sky-50 text-[#09090B]"
                           }`}
                         >
+                          {msg.message_type === "audio" && msg.media_metadata?.has_playback === true && (
+                            <audio
+                              controls
+                              preload="none"
+                              className="mb-2 w-full min-w-[220px]"
+                              src={`/api/platform/customer/whatsapp/media?messageId=${encodeURIComponent(msg.id)}`}
+                            />
+                          )}
                           {content.label && (
                             <div
                               className={`mb-1 text-[10px] font-extrabold uppercase tracking-wide ${
