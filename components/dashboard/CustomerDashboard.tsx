@@ -617,7 +617,7 @@ export function CustomerDashboard() {
         </div>
       </nav>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="relative flex h-12 shrink-0 items-center justify-between border-b border-[#E0E4EB] bg-white px-4">
           <h1 className="truncate text-[13px] font-semibold">{currentNav.label}</h1>
           <div className="flex items-center gap-1">
