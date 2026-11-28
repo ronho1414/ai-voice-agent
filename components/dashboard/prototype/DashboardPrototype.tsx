@@ -405,6 +405,7 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [channelFilter, setChannelFilter] = useState<Channel | "all">("all");
+  const [stickyId, setStickyId] = useState<string | null>(initialView === "whatsapp" ? "chen" : null);
   const [draft, setDraft] = useState("");
   const [bellOpen, setBellOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -433,17 +434,20 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return inChannel.filter((thread) => {
-      if (statusFilter === "unread" && !thread.unread) return false;
-      if (statusFilter === "human" && !(thread.handler === "human" && !thread.resolved)) return false;
-      if (statusFilter === "ai" && !(thread.handler === "ai" && !thread.resolved)) return false;
-      if (statusFilter === "resolved" && !thread.resolved) return false;
-      if (!needle) return true;
-      return thread.name.toLowerCase().includes(needle) || thread.preview.toLowerCase().includes(needle);
+      const searchOk =
+        !needle || thread.name.toLowerCase().includes(needle) || thread.preview.toLowerCase().includes(needle);
+      if (!searchOk) return false;
+      const statusOk =
+        statusFilter === "all" ||
+        (statusFilter === "unread" && thread.unread) ||
+        (statusFilter === "human" && thread.handler === "human" && !thread.resolved) ||
+        (statusFilter === "ai" && thread.handler === "ai" && !thread.resolved) ||
+        (statusFilter === "resolved" && thread.resolved);
+      return statusOk || thread.id === stickyId;
     });
-  }, [inChannel, query, statusFilter]);
+  }, [inChannel, query, statusFilter, stickyId]);
 
   const selected = threads.find((thread) => thread.id === selectedId) ?? null;
-  const selectedVisible = visible.some((thread) => thread.id === selectedId);
 
   useEffect(() => {
     const node = threadRef.current;
@@ -465,6 +469,7 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
   function openThread(id: string) {
     setView("whatsapp");
     setSelectedId(id);
+    setStickyId(id);
     setThreads((currentThreads) =>
       currentThreads.map((thread) => (thread.id === id ? { ...thread, unread: false } : thread)),
     );
@@ -505,18 +510,27 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
 
   return (
     <div data-prototype="dashboard" className="fixed inset-0 flex overflow-hidden bg-white text-[13px] text-[#20293B]">
-      <style>{`nextjs-portal{display:none !important}`}</style>
-      <nav aria-label="功能導航" className="relative z-30 flex h-full w-[88px] shrink-0 flex-col bg-[#F0F3F8] px-1.5 py-2.5">
-        <div className="mb-3 flex justify-center px-0.5 pt-1">
-          <Image
-            src={WORDMARK_ON_LIGHT}
-            alt="orai"
-            width={2400}
-            height={1130}
-            priority
-            unoptimized
-            className="h-[34px] w-auto"
-          />
+      <style>{`
+        nextjs-portal{display:none !important}
+        .orai-logo-slot{--mark-h:40px;--mark-w:calc(var(--mark-h) * 2400 / 1130);--mark-o:calc(var(--mark-h) * 868 / 1130);--mark-cx:calc(var(--mark-h) * 434 / 1130)}
+        .orai-logo-reveal{position:absolute;top:0;left:calc(50% - var(--mark-cx));height:var(--mark-h);width:var(--mark-o);overflow:hidden;transition:width 350ms cubic-bezier(0.4, 0, 0.2, 1)}
+        .orai-logo-slot:hover .orai-logo-reveal,.orai-logo-slot:focus-within .orai-logo-reveal{width:var(--mark-w)}
+        .orai-logo-img{display:block;height:var(--mark-h) !important;width:var(--mark-w) !important;max-width:none !important;max-height:none !important}
+        @media (prefers-reduced-motion: reduce){.orai-logo-reveal{transition:none}}
+      `}</style>
+      <nav aria-label="功能導航" className="relative z-30 flex h-full w-[88px] shrink-0 flex-col overflow-visible bg-[#F0F3F8] px-1.5 py-2.5">
+        <div className="orai-logo-slot relative mb-7 h-10 w-full shrink-0">
+          <div className="orai-logo-reveal">
+            <Image
+              src={WORDMARK_ON_LIGHT}
+              alt="orai"
+              width={2400}
+              height={1130}
+              priority
+              unoptimized
+              className="orai-logo-img"
+            />
+          </div>
         </div>
         <div className="flex flex-col gap-0.5">
           {NAV.map((item) => {
@@ -619,7 +633,7 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
           <Inbox
             counts={counts}
             visible={visible}
-            selected={selectedVisible ? selected : null}
+            selected={selected}
             selectedId={selectedId}
             query={query}
             statusFilter={statusFilter}
@@ -627,8 +641,14 @@ export function DashboardPrototype({ initialView = "overview" }: { initialView?:
             draft={draft}
             threadRef={threadRef}
             onQuery={setQuery}
-            onStatus={setStatusFilter}
-            onChannel={setChannelFilter}
+            onStatus={(value) => {
+              setStickyId(null);
+              setStatusFilter(value);
+            }}
+            onChannel={(value) => {
+              setStickyId(null);
+              setChannelFilter(value);
+            }}
             onSelect={openThread}
             onToggle={toggleHandler}
             onDraft={setDraft}
