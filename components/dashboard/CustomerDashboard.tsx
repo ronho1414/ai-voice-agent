@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, type ChangeEvent, type FormEvent } from "react";
+import Image from "next/image";
 import { BEAUTY_WINDOWS } from "@/lib/beauty/catalog";
 import type {
   Conversation,
@@ -16,6 +17,18 @@ import type { MessageCounts } from "@/lib/platform/messages";
 import { WhatsAppInboxPanel, type WhatsAppCounts } from "@/components/whatsapp/WhatsAppInboxPanel";
 
 type DashboardIconName = "overview" | "calls" | "appointments" | "messages" | "whatsapp" | "knowledge" | "profile" | "agent";
+type DashboardTab = DashboardIconName;
+
+const DASHBOARD_NAV: { id: DashboardTab; label: string; hint: string }[] = [
+  { id: "overview", label: "營運總覽", hint: "業務數據及 AI 使用概況" },
+  { id: "calls", label: "通話紀錄", hint: "錄音、逐字稿及摘要" },
+  { id: "appointments", label: "預約管理", hint: "客戶預約及跟進" },
+  { id: "messages", label: "留言跟進", hint: "AI 收集嘅留言及待辦事項" },
+  { id: "whatsapp", label: "WhatsApp", hint: "即時對話及真人接管" },
+  { id: "knowledge", label: "知識庫", hint: "FAQ 及 AI 參考資料" },
+  { id: "profile", label: "商戶資料", hint: "公司及營業資訊" },
+  { id: "agent", label: "AI 專員", hint: "聲線、語氣及 Agent 偏好" },
+];
 
 type ConversationTranscriptTurn = {
   role: string;
@@ -63,7 +76,8 @@ export function CustomerDashboard() {
   const [authenticated, setAuthenticated] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
-  const [tab, setTab] = useState<"overview" | "calls" | "appointments" | "messages" | "whatsapp" | "knowledge" | "profile" | "agent">("overview");
+  const [tab, setTab] = useState<DashboardTab>("overview");
+  const [accountOpen, setAccountOpen] = useState(false);
 
   // Overview data
   const [overview, setOverview] = useState<CustomerOverview | null>(null);
@@ -531,159 +545,85 @@ export function CustomerDashboard() {
     );
   }
 
+  const currentNav = DASHBOARD_NAV.find((item) => item.id === tab) ?? DASHBOARD_NAV[0];
+
   // Authenticated Customer Dashboard
   return (
-    <div className="min-h-screen bg-[#FAFAFA] flex flex-col md:flex-row text-[#09090B]">
-      {/* Sidebar */}
-      <aside className="w-full md:w-64 bg-white border-r border-[#E4E4E7] flex flex-col shrink-0">
-        <div className="p-6 border-b border-[#E4E4E7]">
-          <div className="flex items-center gap-2.5">
-            <span className="w-8 h-8 rounded-lg bg-[#09090B] text-white flex items-center justify-center font-extrabold text-sm">
-              O
-            </span>
-            <div>
-              <div className="font-extrabold text-base tracking-tight leading-none truncate max-w-[150px]">
-                {overview?.organization.name || "商戶儀表板"}
-              </div>
-              <div className="text-[11px] font-semibold text-[#71717A] mt-0.5">Customer Portal</div>
-            </div>
+    <div className="prototype-shell fixed inset-0 flex overflow-hidden bg-white text-[13px] text-[#20293B]">
+      <style>{`
+        .prototype-shell{--mark-h:36px;--mark-w:calc(var(--mark-h) * 2400 / 1130);--mark-o:calc(var(--mark-h) * 868 / 1130);--mark-cx:calc(var(--mark-h) * 434 / 1130)}
+        .orai-logo-reveal{position:absolute;top:0;left:calc(50% - var(--mark-cx));height:var(--mark-h);width:var(--mark-o);overflow:hidden;transition:left 350ms cubic-bezier(0.4, 0, 0.2, 1),width 350ms cubic-bezier(0.4, 0, 0.2, 1)}
+        .orai-logo-slot:hover .orai-logo-reveal,.orai-logo-slot:focus-within .orai-logo-reveal{left:calc(50% - var(--mark-w) / 2);width:var(--mark-w)}
+        .orai-logo-img{display:block;height:var(--mark-h) !important;width:var(--mark-w) !important;max-width:none !important}
+        @media (prefers-reduced-motion: reduce){.orai-logo-reveal{transition:none}}
+      `}</style>
+      <nav aria-label="功能導航" className="relative z-30 flex h-full w-[144px] shrink-0 flex-col bg-[#F0F3F8] px-2 py-2.5">
+        <div className="orai-logo-slot relative mb-7 h-9 w-full shrink-0">
+          <div className="orai-logo-reveal">
+            <Image src="/prototype/logo-dark-bg.png" alt="orai" width={2400} height={1130} priority unoptimized className="orai-logo-img" />
           </div>
         </div>
-
-        <nav className="p-4 space-y-1 flex-1">
-          <button
-            type="button"
-            onClick={() => setTab("overview")}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
-              tab === "overview" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
-            }`}
-          >
-            <DashboardIcon name="overview" />
-            <span>營業總覽 (Overview)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setTab("calls")}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
-              tab === "calls" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
-            }`}
-          >
-            <DashboardIcon name="calls" />
-            <span>通話紀錄 (Call History)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setTab("appointments")}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
-              tab === "appointments" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
-            }`}
-          >
-            <DashboardIcon name="appointments" />
-            <span>預約管理 (Appointments)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setTab("messages")}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
-              tab === "messages" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
-            }`}
-          >
-            <DashboardIcon name="messages" />
-            <span className="flex-1">留言及跟進</span>
-            {pendingMessageCount !== null && pendingMessageCount > 0 && (
-              <span
-                aria-label={`待處理 ${pendingMessageCount} 則`}
-                className={`min-w-[1.25rem] rounded-full px-1.5 py-0.5 text-center text-[10px] font-extrabold ${
-                  tab === "messages" ? "bg-white text-[#09090B]" : "bg-[#09090B] text-white"
+        <div className="flex flex-col gap-0.5">
+          {DASHBOARD_NAV.map((item) => {
+            const active = tab === item.id;
+            const badge = item.id === "messages" ? pendingMessageCount : item.id === "whatsapp" ? pendingWhatsAppCount : null;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setTab(item.id)}
+                aria-current={active ? "page" : undefined}
+                className={`group relative flex flex-col items-center gap-1 rounded-md px-1 py-1.5 ${
+                  active ? "bg-[#E3EDFC] text-[#2563EB]" : "text-[#7C8798] hover:bg-white/80 hover:text-[#20293B]"
                 }`}
               >
-                {pendingMessageCount > 99 ? "99+" : pendingMessageCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setTab("whatsapp")}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
-              tab === "whatsapp" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
-            }`}
-          >
-            <DashboardIcon name="whatsapp" />
-            <span className="flex-1">WhatsApp Inbox</span>
-            {pendingWhatsAppCount !== null && pendingWhatsAppCount > 0 && (
-              <span
-                aria-label={`WhatsApp 未讀 ${pendingWhatsAppCount} 則`}
-                className={`min-w-[1.25rem] rounded-full px-1.5 py-0.5 text-center text-[10px] font-extrabold ${
-                  tab === "whatsapp" ? "bg-white text-[#09090B]" : "bg-[#09090B] text-white"
-                }`}
-              >
-                {pendingWhatsAppCount > 99 ? "99+" : pendingWhatsAppCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setTab("knowledge")}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
-              tab === "knowledge" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
-            }`}
-          >
-            <DashboardIcon name="knowledge" />
-            <span>知識庫及 FAQ</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setTab("profile")}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
-              tab === "profile" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
-            }`}
-          >
-            <DashboardIcon name="profile" />
-            <span>商戶資料 (Business Profile)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setTab("agent")}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors text-left ${
-              tab === "agent" ? "bg-[#09090B] text-white" : "text-[#52525B] hover:bg-[#F4F4F5]"
-            }`}
-          >
-            <DashboardIcon name="agent" />
-            <span>我的 AI 專員</span>
-          </button>
-        </nav>
-
-        <div className="p-4 border-t border-[#E4E4E7]">
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="w-full py-2 rounded-xl border border-[#E4E4E7] bg-white text-xs font-bold text-[#52525B] hover:bg-slate-50 transition-colors"
-          >
-            登出商戶後台
-          </button>
+                <span className="relative">
+                  <DashboardIcon name={item.id} className="h-[22px] w-[22px]" />
+                  {badge !== null && badge > 0 && (
+                    <span className="absolute -right-2.5 -top-1.5 min-w-[14px] rounded-full bg-[#2563EB] px-1 text-center text-[9px] font-semibold leading-[14px] text-white">
+                      {badge > 99 ? "99+" : badge}
+                    </span>
+                  )}
+                </span>
+                <span className="max-w-full truncate text-[11px] leading-none">{item.label}</span>
+                <span role="tooltip" className="pointer-events-none absolute left-full top-1/2 z-40 ml-2 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-[#20293B] px-2 py-1 text-left text-[11px] leading-4 text-white group-hover:block group-focus-visible:block">
+                  {item.label}
+                  <span className="block text-[10px] text-[#C5CDD8]">{item.hint}</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
-      </aside>
+      </nav>
 
-      {/* Content Area */}
-      <main className="flex-1 p-6 sm:p-10 max-w-6xl w-full">
-        <div className="mb-7 flex items-center justify-between gap-4">
-          <div className="font-bold text-base">Orai 客戶管理後台</div>
-          <div className="flex items-center gap-3">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="relative flex h-12 shrink-0 items-center justify-between border-b border-[#E0E4EB] bg-white px-4">
+          <h1 className="truncate text-[13px] font-semibold">{currentNav.label}</h1>
+          <div className="flex items-center gap-1">
             <NotificationBell
               onOpenRequest={openManagedRequest}
               onOpenMessage={openInboxMessage}
               onOpenWhatsApp={openWhatsAppInbox}
             />
-            <span className="rounded-full bg-sky-100 px-3 py-1 text-[11px] font-bold text-sky-700">商戶專屬</span>
+            <button
+              type="button"
+              aria-expanded={accountOpen}
+              aria-label="帳戶選單"
+              onClick={() => setAccountOpen((open) => !open)}
+              className="rounded-md px-2 py-1 text-[12px] text-[#20293B] hover:bg-[#F0F3F8]"
+            >
+              {overview?.organization.name || "商戶"}
+            </button>
+            {accountOpen && (
+              <div className="absolute right-4 top-12 z-40 w-48 rounded-md border border-[#E0E4EB] bg-white p-2 shadow-stripe-sm">
+                <button type="button" onClick={() => void handleLogout()} className="w-full rounded px-2 py-1.5 text-left text-[12px] text-[#20293B] hover:bg-[#F7F8FA]">
+                  登出
+                </button>
+              </div>
+            )}
           </div>
-        </div>
+        </header>
+      <main className={tab === "whatsapp" ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto bg-white p-5"}>
         {error && (
           <div className="mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
             {error}
@@ -1323,6 +1263,7 @@ export function CustomerDashboard() {
           />
         )}
       </main>
+      </div>
     </div>
   );
 }

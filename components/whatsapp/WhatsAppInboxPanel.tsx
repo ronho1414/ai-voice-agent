@@ -465,14 +465,8 @@ export function WhatsAppInboxPanel({
   );
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight text-[#09090B]">WhatsApp Inbox</h1>
-          <p className="mt-1 text-xs text-[#71717A]">
-            由 ORAI 後端統一路由 WhatsApp 訊息，支援即時檢視對話、真人接管（Take Over）及恢復 AI 自動回覆。
-          </p>
-        </div>
+    <div className="flex h-full min-h-0 flex-col bg-white text-[13px] text-[#20293B]">
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b border-[#E0E4EB] px-3 py-2">
         <div className="flex items-center gap-2">
           <span
             className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-bold ${
@@ -489,7 +483,7 @@ export function WhatsAppInboxPanel({
           <button
             type="button"
             onClick={() => void loadInbox(selectedId)}
-            className="rounded-xl border border-[#E4E4E7] bg-white px-3 py-1.5 text-xs font-bold text-[#09090B] hover:bg-[#F4F4F5]"
+            className="rounded-md border border-[#E0E4EB] bg-white px-2.5 py-1 text-[12px] text-[#20293B] hover:bg-[#F7F8FA]"
           >
             重新整理
           </button>
@@ -514,44 +508,39 @@ export function WhatsAppInboxPanel({
         </div>
       )}
 
-      <div className="grid grid-cols-1 overflow-hidden rounded-2xl border border-[#E4E4E7] bg-white shadow-stripe-sm lg:grid-cols-[22rem_1fr] lg:min-h-[640px]">
-        {/* Left Pane: Conversation List */}
+      <div className="flex min-h-0 flex-1">
+        <aside className={`w-[180px] shrink-0 flex-col overflow-y-auto border-r border-[#E0E4EB] bg-white px-2 py-3 ${mobileShowChat ? "hidden lg:flex" : "flex"}`}>
+          {FILTER_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => setFilter(opt.key)}
+              className={`flex items-center justify-between rounded-md px-2 py-1.5 text-left text-[12px] ${
+                filter === opt.key ? "bg-[#E3EDFC] font-medium text-[#2563EB]" : "text-[#20293B] hover:bg-[#F7F8FA]"
+              }`}
+            >
+              <span>{opt.label}</span>
+              <span className={filter === opt.key ? "text-[#2563EB]" : "text-[#657084]"}>{filterBadgeCount[opt.key]}</span>
+            </button>
+          ))}
+        </aside>
         <section
           aria-label="WhatsApp 對話列表"
-          className={`flex flex-col border-b border-[#E4E4E7] lg:border-b-0 lg:border-r ${
+          className={`flex w-full flex-col border-r border-[#E0E4EB] md:w-[300px] ${
             mobileShowChat ? "hidden lg:flex" : "flex"
           }`}
         >
-          <div className="border-b border-[#E4E4E7] p-3.5 space-y-3">
+          <div className="shrink-0 border-b border-[#E0E4EB] p-2.5">
             <input
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜尋客戶名稱、電話或最後訊息…"
-              className="w-full rounded-xl border border-[#E4E4E7] bg-[#FAFAFA] px-3 py-2 text-xs text-[#09090B] outline-none focus:border-[#09090B] focus:bg-white"
+              placeholder="搜尋客戶或訊息"
+              className="w-full rounded-md border border-[#E0E4EB] bg-[#F7F8FA] px-2 py-1.5 text-[12px] text-[#20293B] outline-none focus:border-[#2563EB]"
             />
-            <div className="flex flex-wrap gap-1.5">
-              {FILTER_OPTIONS.map((opt) => (
-                <button
-                  key={opt.key}
-                  type="button"
-                  onClick={() => setFilter(opt.key)}
-                  className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold transition-colors ${
-                    filter === opt.key
-                      ? "bg-[#09090B] text-white"
-                      : "bg-[#F4F4F5] text-[#52525B] hover:bg-[#E4E4E7]"
-                  }`}
-                >
-                  <span>{opt.label}</span>
-                  {filterBadgeCount[opt.key] > 0 && (
-                    <span className="opacity-75">({filterBadgeCount[opt.key]})</span>
-                  )}
-                </button>
-              ))}
-            </div>
           </div>
 
-          <div className="flex-1 divide-y divide-[#F4F4F5] overflow-y-auto max-h-[560px] lg:max-h-[620px]">
+          <div className="min-h-0 flex-1 divide-y divide-[#E0E4EB] overflow-y-auto overscroll-contain">
             {loadingList && conversations.length === 0 ? (
               <div className="px-4 py-12 text-center text-xs text-[#71717A]">載入對話中…</div>
             ) : conversations.length === 0 ? (
@@ -566,8 +555,8 @@ export function WhatsAppInboxPanel({
                     key={conv.id}
                     type="button"
                     onClick={() => void selectConversation(conv)}
-                    className={`w-full px-4 py-3.5 text-left transition-colors ${
-                      isActive ? "bg-[#F4F4F5]" : "bg-white hover:bg-[#FAFAFA]"
+                    className={`w-full px-3 py-2.5 text-left ${
+                      isActive ? "bg-[#E3EDFC]" : "bg-white hover:bg-[#F7F8FA]"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -582,7 +571,7 @@ export function WhatsAppInboxPanel({
                           {formatTimeShort(conv.last_message_at)}
                         </div>
                         {conv.unread_count > 0 && (
-                          <span className="mt-1 inline-flex min-w-[1.25rem] justify-center rounded-full bg-[#09090B] px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+                          <span className="mt-1 inline-flex min-w-[1.25rem] justify-center rounded-full bg-[#2563EB] px-1.5 py-0.5 text-[10px] font-semibold text-white">
                             {conv.unread_count > 99 ? "99+" : conv.unread_count}
                           </span>
                         )}
@@ -629,7 +618,7 @@ export function WhatsAppInboxPanel({
         {/* Right Pane: Chat Window */}
         <section
           aria-label="WhatsApp 對話內容"
-          className={`flex flex-col bg-[#FAFAFA] ${!mobileShowChat ? "hidden lg:flex" : "flex"}`}
+          className={`min-w-0 flex-1 flex-col bg-[#F7F8FA] ${!mobileShowChat ? "hidden lg:flex" : "flex"}`}
         >
           {!selectedConv ? (
             <div className="flex flex-1 flex-col items-center justify-center p-10 text-center text-xs text-[#71717A]">
@@ -688,7 +677,7 @@ export function WhatsAppInboxPanel({
                         type="button"
                         disabled={Boolean(busyAction)}
                         onClick={() => void runCommand("take_over")}
-                        className="rounded-xl bg-[#09090B] px-3.5 py-2 text-xs font-bold text-white hover:bg-[#27272A] disabled:opacity-50"
+                        className="rounded-md bg-[#2563EB] px-2.5 py-1 text-[12px] font-medium text-white hover:bg-[#1D4FD7] disabled:opacity-50"
                       >
                         {busyAction === "take_over" ? "接管中…" : "Take Over（真人接管）"}
                       </button>
@@ -697,7 +686,7 @@ export function WhatsAppInboxPanel({
                         type="button"
                         disabled={Boolean(busyAction)}
                         onClick={() => void runCommand("resume_ai")}
-                        className="rounded-xl border border-sky-300 bg-sky-50 px-3.5 py-2 text-xs font-bold text-sky-800 hover:bg-sky-100 disabled:opacity-50"
+                        className="rounded-md border border-[#2563EB] bg-white px-2.5 py-1 text-[12px] font-medium text-[#2563EB] hover:bg-[#E3EDFC] disabled:opacity-50"
                       >
                         {busyAction === "resume_ai" ? "切換中…" : "Resume AI（恢復 AI）"}
                       </button>
@@ -804,7 +793,7 @@ export function WhatsAppInboxPanel({
               </div>
 
               {/* Message Thread */}
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 max-h-[420px]">
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3">
                 {messages.length === 0 ? (
                   <div className="py-12 text-center text-xs text-[#71717A]">此對話尚無訊息紀錄。</div>
                 ) : (
@@ -835,12 +824,12 @@ export function WhatsAppInboxPanel({
                         </div>
 
                         <div
-                          className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
+                          className={`max-w-[70%] rounded-md px-3 py-2 text-[13px] leading-5 ${
                             isCustomer
-                              ? "border border-[#E4E4E7] bg-white text-[#09090B]"
+                              ? "border border-[#E0E4EB] bg-white text-[#20293B]"
                               : isHuman
-                                ? "bg-[#09090B] text-white"
-                                : "border border-sky-200 bg-sky-50 text-[#09090B]"
+                                ? "border border-[#2563EB] bg-white text-[#20293B]"
+                                : "bg-[#E3EDFC] text-[#20293B]"
                           }`}
                         >
                           {msg.message_type === "audio" && msg.media_metadata?.has_playback === true && (
@@ -853,9 +842,7 @@ export function WhatsAppInboxPanel({
                           )}
                           {content.label && (
                             <div
-                              className={`mb-1 text-[10px] font-extrabold uppercase tracking-wide ${
-                                isHuman ? "text-zinc-300" : "text-[#52525B]"
-                              }`}
+                              className="mb-1 text-[10px] font-semibold text-[#657084]"
                             >
                               {content.label}
                             </div>
@@ -904,7 +891,7 @@ export function WhatsAppInboxPanel({
                       <button
                         type="submit"
                         disabled={!draftText.trim() || Boolean(busyAction)}
-                        className="shrink-0 rounded-xl bg-[#09090B] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#27272A] disabled:opacity-40"
+                        className="shrink-0 rounded-md bg-[#2563EB] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#1D4FD7] disabled:opacity-40"
                       >
                         {busyAction === "send_text"
                           ? "傳送中…"
@@ -937,7 +924,7 @@ export function WhatsAppInboxPanel({
                       <button
                         type="submit"
                         disabled={Boolean(busyAction)}
-                        className="rounded-xl bg-[#09090B] px-4 py-2 text-xs font-bold text-white hover:bg-[#27272A] disabled:opacity-40"
+                        className="rounded-md bg-[#2563EB] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#1D4FD7] disabled:opacity-40"
                       >
                         {busyAction === "send_template" ? "發送範本中…" : "發送核准範本"}
                       </button>
